@@ -5,13 +5,16 @@
 #include <string>
 #include <cstdio>
 #include <vector>
+#include <memory>
 #include "CryptoUtil.h"
 #include "NodeSerializer.h"
+#include "ringoram.h" 
 
 // 全局状态
 static int enclave_initialized = 0;
 static sgx_aes_gcm_128bit_key_t master_key;
 static EnclaveCryptoUtils* global_crypto = nullptr;
+static std::unique_ptr<ringoram> g_oram;
 
 // ================================
 // 基础函数
@@ -134,4 +137,104 @@ sgx_status_t ecall_test_nodeserializer() {
     
     ocall_print_string("NodeSerializer test passed successfully!");
     return SGX_SUCCESS;
+}
+
+// ================================
+// ORAM ECALL 实现
+// ================================
+
+sgx_status_t ecall_oram_initialize(int capacity) {
+    if (!enclave_initialized || !global_crypto) {
+        return SGX_ERROR_UNEXPECTED;
+    }
+    
+    try {
+        // 创建 ORAM 实例
+        g_oram = std::make_unique<ringoram>(capacity);
+        
+        // 设置加密工具
+        g_oram->enclave_crypto = global_crypto;
+        
+        char msg[100];
+        snprintf(msg, sizeof(msg), "ORAM initialized with capacity: %d", capacity);
+        ocall_print_string(msg);
+        
+        return SGX_SUCCESS;
+    } catch (const std::exception& e) {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "ORAM initialization failed: %s", e.what());
+        ocall_print_string(msg);
+        return SGX_ERROR_UNEXPECTED;
+    }
+}
+
+sgx_status_t ecall_oram_access(int operation_type, int block_index,
+                              const uint8_t* data, size_t data_size,
+                              uint8_t* result, size_t result_size) {
+    if (!g_oram) {
+        return SGX_ERROR_UNEXPECTED;
+    }
+    
+    try {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "ECALL_ORAM_ACCESS: op_type=%d, block_index=%d, data_size=%zu, result_size=%zu", 
+                 operation_type, block_index, data_size, result_size);
+        ocall_print_string(msg);
+        
+        // 转换操作类型
+        ringoram::Operation op = static_cast<ringoram::Operation>(operation_type);
+        
+        // 转换数据格式
+        std::vector<char> data_vec;
+        if (data && data_size > 0) {
+            data_vec.assign(reinterpret_cast<const char*>(data), 
+                           reinterpret_cast<const char*>(data) + data_size);
+            snprintf(msg, sizeof(msg), "Data vector created, size=%zu", data_vec.size());
+            ocall_print_string(msg);
+        } else {
+            ocall_print_string("No data provided");
+        }
+        
+        // 执行 ORAM 访问
+        std::vector<char> result_vec = g_oram->access(block_index, op, data_vec);
+        
+        snprintf(msg, sizeof(msg), "ORAM access completed, result size=%zu", result_vec.size());
+        ocall_print_string(msg);
+        
+        // 返回结果
+        if (result && result_size >= result_vec.size()) {
+            memcpy(result, result_vec.data(), result_vec.size());
+            snprintf(msg, sizeof(msg), "Result copied to buffer");
+            ocall_print_string(msg);
+        } else if (!result_vec.empty()) {
+            snprintf(msg, sizeof(msg), "ERROR: Result buffer too small: need %zu, got %zu", 
+                     result_vec.size(), result_size);
+            ocall_print_string(msg);
+            return SGX_ERROR_INVALID_PARAMETER;
+        }
+        
+        return SGX_SUCCESS;
+    } catch (const std::exception& e) {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "ORAM access failed: %s", e.what());
+        ocall_print_string(msg);
+        return SGX_ERROR_UNEXPECTED;
+    }
+}
+
+sgx_status_t ecall_oram_evict() {
+    if (!g_oram) {
+        return SGX_ERROR_UNEXPECTED;
+    }
+    
+    try {
+        g_oram->EvictPath();
+        ocall_print_string("ORAM eviction completed");
+        return SGX_SUCCESS;
+    } catch (const std::exception& e) {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "ORAM eviction failed: %s", e.what());
+        ocall_print_string(msg);
+        return SGX_ERROR_UNEXPECTED;
+    }
 }

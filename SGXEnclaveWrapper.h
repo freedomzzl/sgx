@@ -25,6 +25,9 @@ public:
 
      // NodeSerializer功能测试
     bool testNodeSerializer();
+
+    bool testORAMBasic();
+    bool testORAMAccess();
  
     
     // 状态查询

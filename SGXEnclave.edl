@@ -1,19 +1,38 @@
 enclave {
+    // 从可信环境调用不可信环境的函数
     from "sgx_tstdc.edl" import *;
-
+    
     trusted {
-        // 基础测试函数
+        // 定义 ECALLs - 从外部调用enclave的函数
         public sgx_status_t ecall_initialize_enclave();
         public sgx_status_t ecall_test_enclave(int input_value, [out] int* output_value);
-
-        // 加密测试函数
         public sgx_status_t ecall_test_crypto();
-
         public sgx_status_t ecall_test_nodeserializer();
         
+        // ORAM 相关的 ECALLs
+        public sgx_status_t ecall_oram_initialize(int capacity);
+        public sgx_status_t ecall_oram_access(
+            int operation_type,     // 0=READ, 1=WRITE
+            int block_index,
+            [in, size=data_size] const uint8_t* data,    // 写操作的数据
+            size_t data_size,
+            [out, size=result_size] uint8_t* result,     // 读操作的结果
+            size_t result_size
+        );
+        public sgx_status_t ecall_oram_evict();
     };
-
+    
     untrusted {
-        void ocall_print_string([in, string] const char* str);
-    };
+    void ocall_print_string([in, string] const char* str);
+    
+    sgx_status_t ocall_read_bucket(
+        [in] int* position,  // 使用指针传递位置
+        [out, size=4096] uint8_t* data
+    );
+    
+    sgx_status_t ocall_write_bucket(
+        [in] int* position,  // 使用指针传递位置
+        [in, size=4096] const uint8_t* data
+    );
+};
 };
