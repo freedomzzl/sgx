@@ -1,0 +1,19 @@
+enclave {
+    from "sgx_tstdc.edl" import *;
+
+    trusted {
+        // 基础测试函数
+        public sgx_status_t ecall_initialize_enclave();
+        public sgx_status_t ecall_test_enclave(int input_value, [out] int* output_value);
+
+        // 加密测试函数
+        public sgx_status_t ecall_test_crypto();
+
+        public sgx_status_t ecall_test_nodeserializer();
+        
+    };
+
+    untrusted {
+        void ocall_print_string([in, string] const char* str);
+    };
+};
