@@ -81,3 +81,4 @@ public:
     void serialize_block(const block& blk, uint8_t* buffer, size_t& offset) const;
     block deserialize_block(const uint8_t* data, size_t& offset);
 };
+

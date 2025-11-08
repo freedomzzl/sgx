@@ -20,18 +20,19 @@ enclave {
             size_t result_size
         );
         public sgx_status_t ecall_oram_evict();
+        public sgx_status_t ecall_test_ringoram_serialization();
     };
     
     untrusted {
     void ocall_print_string([in, string] const char* str);
     
     sgx_status_t ocall_read_bucket(
-        [in] int* position,  // 使用指针传递位置
+        int position,  
         [out, size=4096] uint8_t* data
     );
     
     sgx_status_t ocall_write_bucket(
-        [in] int* position,  // 使用指针传递位置
+        int position,  
         [in, size=4096] const uint8_t* data
     );
 };

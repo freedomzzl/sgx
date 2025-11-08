@@ -1,3 +1,4 @@
+#include "SGXEnclave_t.h"
 #include "ringoram.h"
 #include <cstring>
 #include "CryptoUtil.h"
@@ -7,7 +8,7 @@
 #include <string.h>
   
 
-extern "C" void ocall_print_string(const char* str);
+
 
 using namespace std;
 
@@ -177,7 +178,7 @@ block ringoram::ReadPath(int leafid, int blockindex) {
             bkt.valids[offset] = 0;
             bkt.count += 1;
         }
-
+        
         sgx_write_bucket(position, bkt);
     }
 
@@ -260,7 +261,8 @@ std::vector<char> ringoram::decrypt_data(const std::vector<char>& encrypted_data
 vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
 {
     char msg[200];
-    snprintf(msg, sizeof(msg), "=== ORAM ACCESS START: blockindex=%d, op=%d ===", blockindex, op);
+   
+    snprintf(msg, sizeof(msg), "Stash size before: %zu", stash.size());
     ocall_print_string(msg);
     
     if (blockindex < 0 || blockindex >= N) {
@@ -275,12 +277,9 @@ vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
     ocall_print_string(msg);
 
     // 1. 读取路径获取目标块
-    snprintf(msg, sizeof(msg), "Calling ReadPath for leaf=%d, blockindex=%d", oldLeaf, blockindex);
-    ocall_print_string(msg);
-    
     block interestblock = ReadPath(oldLeaf, blockindex);
     
-    snprintf(msg, sizeof(msg), "ReadPath returned, blockindex=%d, isDummy=%d", 
+    snprintf(msg, sizeof(msg), "After ReadPath: blockindex=%d, isDummy=%d", 
              interestblock.GetBlockindex(), interestblock.IsDummy());
     ocall_print_string(msg);
 
@@ -288,26 +287,29 @@ vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
 
     // 2. 处理读取到的块
     if (interestblock.GetBlockindex() == blockindex) {
-        ocall_print_string("Target block found in path");
         if (!interestblock.IsDummy()) {
             blockdata = decrypt_data(interestblock.GetData());
-            ocall_print_string("Block decrypted successfully");
+            ocall_print_string("Block decrypted from path");
         }
         else {
             blockdata = interestblock.GetData();
-            ocall_print_string("Block is dummy");
+            ocall_print_string("Dummy block from path");
         }
     }
     else {
-        ocall_print_string("Target block not in path, checking stash");
-        // 3. 如果不在路径中，检查stash
+        ocall_print_string("Block not in path, checking stash");
+        bool found_in_stash = false;
         for (auto it = stash.begin(); it != stash.end(); ++it) {
             if (it->GetBlockindex() == blockindex) {
                 blockdata = it->GetData();
                 stash.erase(it);
+                found_in_stash = true;
                 ocall_print_string("Block found in stash");
                 break;
             }
+        }
+        if (!found_in_stash) {
+            ocall_print_string("Block not found anywhere, returning empty");
         }
     }
 
@@ -319,37 +321,21 @@ vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
 
     // 明文放入stash
     stash.emplace_back(positionmap[blockindex], blockindex, blockdata);
-    snprintf(msg, sizeof(msg), "Block added to stash, stash size=%zu", stash.size());
+    snprintf(msg, sizeof(msg), "Stash size after: %zu", stash.size());
     ocall_print_string(msg);
 
     // 5. 路径管理和驱逐
     round = (round + 1) % EvictRound;
     if (round == 0) {
-        ocall_print_string("Triggering EvictPath");
+        ocall_print_string("=== EVICTING PATH ===");
         EvictPath();
+        ocall_print_string("=== EVICTION COMPLETED ===");
     }
 
-    ocall_print_string("Calling EarlyReshuffle");
     EarlyReshuffle(oldLeaf);
 
-    ocall_print_string("=== ORAM ACCESS COMPLETED ===");
-    
-    // 调试返回数据
-    
-    snprintf(msg, sizeof(msg), "Returning data, size=%zu", blockdata.size());
+    snprintf(msg, sizeof(msg), "Returning data size: %zu", blockdata.size());
     ocall_print_string(msg);
-    
-    if (!blockdata.empty()) {
-        snprintf(msg, sizeof(msg), "First 10 bytes: ");
-        for (int i = 0; i < std::min(10, (int)blockdata.size()); i++) {
-            char byte_msg[10];
-            snprintf(byte_msg, sizeof(byte_msg), "%02x ", (unsigned char)blockdata[i]);
-
-        }
-        ocall_print_string(msg);
-    } else {
-        ocall_print_string("Returning empty data");
-    }
     
     return blockdata;
 }
@@ -360,6 +346,10 @@ size_t ringoram::calculate_bucket_size(const bucket& bkt) const{
     for (const auto& blk : bkt.blocks) {
         size += sizeof(SerializedBlockHeader) + blk.GetData().size();
     }
+    
+    // 添加ptrs和valids的大小
+    size_t ptrs_valids_size = (bkt.ptrs.size() + bkt.valids.size()) * sizeof(int32_t);
+    size += ptrs_valids_size;
     
     return size;
 }
@@ -428,21 +418,33 @@ std::vector<uint8_t> ringoram::serialize_bucket(const bucket& bkt) {
 bucket ringoram::deserialize_bucket(const uint8_t* data, size_t size) {
     if (size < sizeof(SerializedBucketHeader)) {
         ocall_print_string("Invalid bucket data: too small");
-        // 返回一个默认的bucket而不是抛出异常
         return bucket(realBlockEachbkt, dummyBlockEachbkt);
     }
     
     const SerializedBucketHeader* bucket_header = reinterpret_cast<const SerializedBucketHeader*>(data);
-    bucket result(bucket_header->Z, bucket_header->S);
+    
+    // 创建bucket但不预先分配blocks
+    bucket result(0, 0);  // 先创建空的
+    result.Z = bucket_header->Z;
+    result.S = bucket_header->S;
     result.count = bucket_header->count;
+    
+    // 清空blocks，重新从序列化数据填充
+    result.blocks.clear();
     
     size_t offset = sizeof(SerializedBucketHeader);
     
+    // 反序列化 blocks
     for (int i = 0; i < bucket_header->num_blocks && offset < size; i++) {
         result.blocks.push_back(deserialize_block(data, offset));
     }
     
-    int num_slots = bucket_header->Z + bucket_header->S;
+    // 重新初始化ptrs和valids
+    int num_slots = result.Z + result.S;
+    result.ptrs.resize(num_slots, -1);
+    result.valids.resize(num_slots, 0);
+    
+    // 反序列化 ptrs 和 valids
     if (offset + num_slots * 2 * sizeof(int32_t) <= size) {
         for (int i = 0; i < num_slots; i++) {
             int32_t ptr = *reinterpret_cast<const int32_t*>(data + offset);
@@ -464,54 +466,61 @@ bucket ringoram::deserialize_bucket(const uint8_t* data, size_t size) {
 // SGX 存储访问方法
 // ================================
 
-extern "C" {
-    sgx_status_t ocall_read_bucket(int* position, uint8_t* data);
-    sgx_status_t ocall_write_bucket(int* position, const uint8_t* data);
-}
-
-
 bucket ringoram::sgx_read_bucket(int position) {
-    char msg[200];
-    snprintf(msg, sizeof(msg), "1. Entering sgx_read_bucket, position=%d", position);
-    ocall_print_string(msg);
-    
     const size_t BUFFER_SIZE = 4096;
     uint8_t buffer[BUFFER_SIZE];
     memset(buffer, 0, BUFFER_SIZE);
-    
-    snprintf(msg, sizeof(msg), "2. Calling ocall_read_bucket with position pointer");
-    ocall_print_string(msg);
-    
-    // 传递位置指针而不是值
-    int pos = position;  // 创建局部变量
-    sgx_status_t ret = ocall_read_bucket(&pos, buffer);
-    
-    snprintf(msg, sizeof(msg), "3. ocall_read_bucket returned: %d", ret);
-    ocall_print_string(msg);
-    
+
+    // ocall 的封装函数第一个参数是用于接收 host 实现返回值的 sgx_status_t*
+    sgx_status_t ocall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ocall_read_bucket(&ocall_ret, position, buffer);
+
     if (ret != SGX_SUCCESS) {
-        throw std::runtime_error("OCALL read bucket failed");
+        ocall_print_string("SGX: ocall_read_bucket failed at runtime level");
+        throw std::runtime_error("OCALL runtime failure (ocall_read_bucket)");
     }
+    if (ocall_ret != SGX_SUCCESS) {
+        ocall_print_string("SGX: ocall_read_bucket reported host-level failure");
+        throw std::runtime_error("OCALL host-level failure (ocall_read_bucket)");
+    }
+
     
     return deserialize_bucket(buffer, BUFFER_SIZE);
 }
 
 void ringoram::sgx_write_bucket(int position, const bucket& bkt) {
-    char msg[200];
-    snprintf(msg, sizeof(msg), "Before OCALL write bucket at position %d", position);
-    ocall_print_string(msg);
-    
+    const size_t BUFFER_SIZE = 4096;
+
+    // 序列化
     auto serialized = serialize_bucket(bkt);
-    
     if (serialized.empty()) {
+        ocall_print_string("SGX: serialize_bucket returned empty");
         throw std::runtime_error("Bucket serialization failed");
     }
-    
-    // 传递位置指针而不是值
-    int pos = position;  // 创建局部变量
-    sgx_status_t ret = ocall_write_bucket(&pos, serialized.data());
-    
+
+    // EDL 指定 size=4096，必须向 host 传递 4096 字节（不足时 pad，超出时报错）
+    if (serialized.size() > BUFFER_SIZE) {
+        char errbuf[200];
+        snprintf(errbuf, sizeof(errbuf), "SGX: serialized bucket too large: %zu > %zu", serialized.size(), BUFFER_SIZE);
+        ocall_print_string(errbuf);
+        throw std::runtime_error("Serialized bucket larger than allowed buffer (4096)");
+    }
+
+    // 准备 4096 字节缓冲并复制序列化数据
+    std::vector<uint8_t> sbuf(BUFFER_SIZE);
+    memset(sbuf.data(), 0, BUFFER_SIZE);
+    memcpy(sbuf.data(), serialized.data(), serialized.size());
+
+    // 调用 ocall（第一个参数为接收 host 返回值的指针）
+    sgx_status_t ocall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ocall_write_bucket(&ocall_ret, position, sbuf.data());
+
     if (ret != SGX_SUCCESS) {
-        throw std::runtime_error("OCALL write bucket failed");
+        ocall_print_string("SGX: ocall_write_bucket failed at runtime level");
+        throw std::runtime_error("OCALL runtime failure (ocall_write_bucket)");
+    }
+    if (ocall_ret != SGX_SUCCESS) {
+        ocall_print_string("SGX: ocall_write_bucket reported host-level failure");
+        throw std::runtime_error("OCALL host-level failure (ocall_write_bucket)");
     }
 }

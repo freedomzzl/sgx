@@ -24,7 +24,7 @@ HOST_SRC_CPP := SGXEnclaveWrapper.cpp ServerStorage.cpp test_sgx_basic.cpp
 HOST_SRC_C   := SGXEnclave_u.c
 
 # 共享源文件（在两边都需要编译）
-SHARED_SRC_CPP := bucket.cpp block.cpp param.cpp
+SHARED_SRC_CPP := bucket.cpp block.cpp param.cpp 
 
 # 对象文件（避免命名冲突）
 ENCLAVE_OBJS := $(ENCLAVE_SRC_CPP:.cpp=.enclave.o) $(SHARED_SRC_CPP:.cpp=.enclave.o) $(ENCLAVE_SRC_C:.c=.enclave.o)

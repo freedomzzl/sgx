@@ -19,7 +19,7 @@ public:
     // 基础功能测试
     bool initializeEnclave(const std::string& enclave_path = "enclave.signed.so");
     int testEnclave(int input_value);
-
+    bool initialize_external_storage(int capacity);
     // 加密功能测试
     bool testCrypto();
 
@@ -28,7 +28,6 @@ public:
 
     bool testORAMBasic();
     bool testORAMAccess();
- 
     
     // 状态查询
     bool isInitialized() const { return initialized; }

@@ -2,6 +2,7 @@
 #include "SGXEnclave_u.h"
 #include "ringoram.h"
 #include "ServerStorage.h"
+#include"param.h"
 #include <iostream>
 #include <cstring>
 #include <vector>
@@ -24,49 +25,42 @@ extern "C" void ocall_print_string(const char* str) {
 // ================================
 
 size_t calculate_bucket_size(const bucket& bkt) {
+    
     size_t size = sizeof(SerializedBucketHeader);
     
-    std::cout << "Header size: " << sizeof(SerializedBucketHeader) << std::endl;
-    
-    for (const auto& blk : bkt.blocks) {
+    // 计算blocks大小
+    size_t blocks_size = 0;
+    for (int i = 0; i < bkt.blocks.size(); i++) {
+        const auto& blk = bkt.blocks[i];
         size_t block_size = sizeof(SerializedBlockHeader) + blk.GetData().size();
-        size += block_size;
-        std::cout << "Block data size: " << blk.GetData().size() << ", total block size: " << block_size << std::endl;
+        blocks_size += block_size;
+      
     }
+    size += blocks_size;
     
-    // 添加 ptrs 和 valids 的大小
+    // 计算ptrs和valids大小
     size_t ptrs_valids_size = (bkt.ptrs.size() + bkt.valids.size()) * sizeof(int32_t);
     size += ptrs_valids_size;
-    std::cout << "Ptrs+Valids size: " << ptrs_valids_size << std::endl;
-    
-    std::cout << "Total calculated size: " << size << std::endl;
-    
+ 
     return size;
 }
 
 void serialize_block(const block& blk, uint8_t* buffer, size_t& offset) {
-    std::cout << "Serializing block, current offset: " << offset << std::endl;
-    
+  
     SerializedBlockHeader* header = reinterpret_cast<SerializedBlockHeader*>(buffer + offset);
     header->leaf_id = blk.GetLeafid();
     header->block_index = blk.GetBlockindex();
     
     const auto& data = blk.GetData();
     header->data_size = static_cast<int32_t>(data.size());
-    
-    std::cout << "Block header: leaf_id=" << header->leaf_id 
-              << ", block_index=" << header->block_index 
-              << ", data_size=" << header->data_size << std::endl;
-    
+ 
     offset += sizeof(SerializedBlockHeader);
     
     if (!data.empty()) {
-        std::cout << "Copying block data, size: " << data.size() << std::endl;
         memcpy(buffer + offset, data.data(), data.size());
         offset += data.size();
     }
-    
-    std::cout << "Block serialized, new offset: " << offset << std::endl;
+
 }
 
 block deserialize_block(const uint8_t* data, size_t& offset) {
@@ -84,39 +78,42 @@ block deserialize_block(const uint8_t* data, size_t& offset) {
 }
 
 std::vector<uint8_t> serialize_bucket(const bucket& bkt) {
+   
     try {
-        std::cout << "Starting serialize_bucket..." << std::endl;
-        
+    
+        // 先计算大小
+
         size_t total_size = calculate_bucket_size(bkt);
-        std::cout << "Total size calculated: " << total_size << std::endl;
-        
+     
+        if (total_size == 0) {
+            std::cerr << "ERROR: Calculated size is 0" << std::endl;
+            return std::vector<uint8_t>();
+        }
+       
         std::vector<uint8_t> result(total_size);
-        std::cout << "Vector allocated" << std::endl;
-        
+      
         // 序列化 bucket header
+      
         SerializedBucketHeader* bucket_header = reinterpret_cast<SerializedBucketHeader*>(result.data());
         bucket_header->Z = bkt.Z;
         bucket_header->S = bkt.S;
         bucket_header->count = bkt.count;
         bucket_header->num_blocks = static_cast<int32_t>(bkt.blocks.size());
-        
-        std::cout << "Header serialized: Z=" << bkt.Z << ", S=" << bkt.S 
-                  << ", num_blocks=" << bkt.blocks.size() << std::endl;
-        
+       
         size_t offset = sizeof(SerializedBucketHeader);
-        std::cout << "Initial offset: " << offset << std::endl;
-        
+       
         // 序列化 blocks
+    
         for (int i = 0; i < bkt.blocks.size(); i++) {
-            std::cout << "Serializing block " << i << std::endl;
+          
             serialize_block(bkt.blocks[i], result.data(), offset);
-            std::cout << "Block " << i << " serialized, offset now: " << offset << std::endl;
+       
         }
         
         // 序列化 ptrs 和 valids
+   
         int num_slots = bkt.Z + bkt.S;
-        std::cout << "Serializing ptrs and valids, num_slots: " << num_slots << std::endl;
-        
+ 
         // 检查边界
         if (offset + num_slots * 2 * sizeof(int32_t) > total_size) {
             std::cerr << "ERROR: Not enough space for ptrs and valids" << std::endl;
@@ -134,8 +131,7 @@ std::vector<uint8_t> serialize_bucket(const bucket& bkt) {
             *reinterpret_cast<int32_t*>(result.data() + offset) = bkt.valids[i];
             offset += sizeof(int32_t);
         }
-        
-        std::cout << "Serialization completed, final offset: " << offset << std::endl;
+ 
         return result;
         
     } catch (const std::exception& e) {
@@ -145,63 +141,98 @@ std::vector<uint8_t> serialize_bucket(const bucket& bkt) {
 }
 
 bucket deserialize_bucket(const uint8_t* data, size_t size) {
-    std::cout << "Starting deserialize_bucket, size: " << size << std::endl;
-    
+ 
     if (size < sizeof(SerializedBucketHeader)) {
-        std::cerr << "ERROR: Data too small for header" << std::endl;
+        std::cerr << "  ERROR: Data too small for header" << std::endl;
         throw std::runtime_error("Invalid bucket data: too small");
     }
     
     const SerializedBucketHeader* bucket_header = reinterpret_cast<const SerializedBucketHeader*>(data);
-    std::cout << "Bucket header: Z=" << bucket_header->Z << ", S=" << bucket_header->S 
-              << ", count=" << bucket_header->count << ", num_blocks=" << bucket_header->num_blocks << std::endl;
-    
-    bucket result(bucket_header->Z, bucket_header->S);
+  
+    // 创建空的bucket
+    bucket result(0, 0);
+    result.Z = bucket_header->Z;
+    result.S = bucket_header->S;
     result.count = bucket_header->count;
     
     size_t offset = sizeof(SerializedBucketHeader);
-    std::cout << "Initial offset: " << offset << std::endl;
-    
+ 
     // 反序列化 blocks
+  
     for (int i = 0; i < bucket_header->num_blocks && offset < size; i++) {
-        std::cout << "Deserializing block " << i << std::endl;
         result.blocks.push_back(deserialize_block(data, offset));
-        std::cout << "Block " << i << " deserialized, offset: " << offset << std::endl;
     }
+ 
+    //从序列化数据中恢复ptrs和valids
+    int num_slots = result.Z + result.S;
+    result.ptrs.resize(num_slots, -1);
+    result.valids.resize(num_slots, 0);
     
-    // 反序列化 ptrs 和 valids
-    int num_slots = bucket_header->Z + bucket_header->S;
-    std::cout << "Deserializing ptrs and valids, num_slots: " << num_slots << std::endl;
-    
-    // 反序列化 ptrs
-    for (int i = 0; i < num_slots && offset + sizeof(int32_t) <= size; i++) {
-        int32_t ptr = *reinterpret_cast<const int32_t*>(data + offset);
-        result.ptrs[i] = ptr;
-        offset += sizeof(int32_t);
+    // 检查是否有足够的空间来读取ptrs和valids
+    if (offset + num_slots * 2 * sizeof(int32_t) <= size) {
+     
+        // 反序列化 ptrs
+        for (int i = 0; i < num_slots; i++) {
+            int32_t ptr = *reinterpret_cast<const int32_t*>(data + offset);
+            result.ptrs[i] = ptr;
+            offset += sizeof(int32_t);
+        }
+        
+        // 反序列化 valids
+        for (int i = 0; i < num_slots; i++) {
+            int32_t valid = *reinterpret_cast<const int32_t*>(data + offset);
+            result.valids[i] = valid;
+            offset += sizeof(int32_t);
+        }
+   
+    } else {
+        std::cout << "  WARNING: No ptrs and valids data in serialized bucket" << std::endl;
     }
-    
-    // 反序列化 valids
-    for (int i = 0; i < num_slots && offset + sizeof(int32_t) <= size; i++) {
-        int32_t valid = *reinterpret_cast<const int32_t*>(data + offset);
-        result.valids[i] = valid;
-        offset += sizeof(int32_t);
-    }
-    
-    std::cout << "Deserialization completed successfully" << std::endl;
+   
     return result;
 }
 
+void checkServerStorageState(int position, const std::string& context) {
+    if (!g_external_storage) {
+        std::cout << "[" << context << "] ServerStorage not initialized" << std::endl;
+        return;
+    }
+    
+    std::cout << "=== SERVERSTORAGE CHECK: " << context << " ===" << std::endl;
+    
+    try {
+        bucket stored_bucket = g_external_storage->GetBucket(position);
+       
+        int real_blocks = 0;
+        for (int i = 0; i < stored_bucket.blocks.size(); i++) {
+            const auto& blk = stored_bucket.blocks[i];
+            if (blk.GetBlockindex() != -1) {
+                real_blocks++;
+                std::vector<char> data = blk.GetData();
+                std::string data_str(data.begin(), data.end());
+                std::cout << "  REAL Block " << i << ": index=" << blk.GetBlockindex() 
+                          << ", data_size=" << data.size();
+                if (data.size() <= 50) {  // 只显示小数据
+                    std::cout << ", data='" << data_str << "'";
+                }
+                std::cout << std::endl;
+            }
+        }
+        std::cout << "Total real blocks: " << real_blocks << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cout << "ERROR reading ServerStorage: " << e.what() << std::endl;
+    }
+}
 // ================================
 // ORAM 存储访问 OCALL 实现（使用统一的序列化）
 // ================================
 
 extern "C" sgx_status_t ocall_read_bucket(
-    int* position,  // 位置指针
+    int position,  // 位置指针
     uint8_t* data) {
     
-    std::cout << "=== OCALL_READ_BUCKET CALLED ===" << std::endl;
-    std::cout << "Position pointer: " << position << ", Value: " << *position << std::endl;
-    
+ 
     try {
         if (!g_external_storage) {
             std::cerr << "ERROR: External storage not initialized" << std::endl;
@@ -209,9 +240,8 @@ extern "C" sgx_status_t ocall_read_bucket(
         }
         
         // 使用解引用的位置值
-        int actual_position = *position;
-        std::cout << "Actual position: " << actual_position << std::endl;
-        
+        int actual_position = position;
+ 
         if (actual_position < 0 || actual_position >= g_external_storage->GetCapacity()) {
             std::cerr << "ERROR: Invalid bucket position: " << actual_position << std::endl;
             return SGX_ERROR_INVALID_PARAMETER;
@@ -227,7 +257,7 @@ extern "C" sgx_status_t ocall_read_bucket(
         }
         
         memcpy(data, serialized.data(), serialized.size());
-        std::cout << "OCALL_READ_BUCKET SUCCESS" << std::endl;
+ 
         return SGX_SUCCESS;
         
     } catch (const std::exception& e) {
@@ -236,12 +266,8 @@ extern "C" sgx_status_t ocall_read_bucket(
     }
 }
 
-extern "C" sgx_status_t ocall_write_bucket(
-    int* position,  // 位置指针
-    const uint8_t* data) {
+extern "C" sgx_status_t ocall_write_bucket(int position, const uint8_t* data) {
     
-    std::cout << "=== OCALL_WRITE_BUCKET CALLED ===" << std::endl;
-    std::cout << "Position pointer: " << position << ", Value: " << *position << std::endl;
     
     try {
         if (!g_external_storage) {
@@ -249,26 +275,34 @@ extern "C" sgx_status_t ocall_write_bucket(
             return SGX_ERROR_UNEXPECTED;
         }
         
-        // 使用解引用的位置值
-        int actual_position = *position;
-        std::cout << "Actual position: " << actual_position << std::endl;
+        // 反序列化要写入的数据
+        bucket bkt_to_write = deserialize_bucket(data, 4096);
         
-        if (actual_position < 0 || actual_position >= g_external_storage->GetCapacity()) {
-            std::cerr << "ERROR: Invalid bucket position: " << actual_position << std::endl;
-            return SGX_ERROR_INVALID_PARAMETER;
+        // 检查要写入的块
+        int real_blocks_to_write = 0;
+        for (int i = 0; i < bkt_to_write.blocks.size(); i++) {
+            const auto& blk = bkt_to_write.blocks[i];
+            if (blk.GetBlockindex() != -1) {
+                real_blocks_to_write++;
+               
+            }
         }
         
-        // 使用固定大小反序列化
-        const size_t BUFFER_SIZE = 4096;
-        bucket bkt_to_write = deserialize_bucket(data, BUFFER_SIZE);
+        // // 写入前检查该位置当前状态
+        // std::cout << "Before write - ";
+        // checkServerStorageState(position, "BEFORE_WRITE");
         
-        g_external_storage->SetBucket(actual_position, bkt_to_write);
+        // 执行写入
+        g_external_storage->SetBucket(position, bkt_to_write);
         
-        std::cout << "OCALL_WRITE_BUCKET SUCCESS" << std::endl;
+        // // 写入后立即验证
+        // std::cout << "After write - ";
+        // checkServerStorageState(position, "AFTER_WRITE");
+        
         return SGX_SUCCESS;
         
     } catch (const std::exception& e) {
-        std::cerr << "Exception: " << e.what() << std::endl;
+        std::cerr << "Exception in ocall_write_bucket: " << e.what() << std::endl;
         return SGX_ERROR_UNEXPECTED;
     }
 }
@@ -277,7 +311,7 @@ extern "C" sgx_status_t ocall_write_bucket(
 // 外部存储初始化函数
 // ================================
 
-bool initialize_external_storage(int capacity) {
+bool SGXEnclaveWrapper::initialize_external_storage(int capacity) {
     try {
         g_external_storage = std::make_unique<ServerStorage>();
         g_external_storage->setCapacity(capacity);
@@ -390,14 +424,13 @@ bool SGXEnclaveWrapper::testORAMBasic() {
     }
     
     // 初始化外部存储
-    int capacity = 1024;
     if (!initialize_external_storage(capacity)) {
         return false;
     }
     
     // 初始化 Enclave 内的 ORAM
     sgx_status_t ecall_ret = SGX_SUCCESS;
-    sgx_status_t ret = ecall_oram_initialize(eid, &ecall_ret, capacity);
+    sgx_status_t ret = ecall_oram_initialize(eid, &ecall_ret, 100);
     
     if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
         std::cerr << "ORAM initialization failed: sgx_ret=" << std::hex << ret 
@@ -405,7 +438,7 @@ bool SGXEnclaveWrapper::testORAMBasic() {
         return false;
     }
     
-    std::cout << "ORAM basic test passed: initialization successful" << std::endl;
+    std::cout << "ORAM initialization successful" << std::endl;
     return true;
 }
 
@@ -414,66 +447,72 @@ bool SGXEnclaveWrapper::testORAMAccess() {
         throw std::runtime_error("Enclave not initialized");
     }
     
+    // 初始化外部存储
+    if (!initialize_external_storage(capacity)) {
+        return false;
+    }
+    
     // 测试数据
     std::string test_data = "Hello ORAM Test Data";
     std::vector<uint8_t> write_data(test_data.begin(), test_data.end());
-    uint8_t write_result[256];  // 为 WRITE 操作添加结果缓冲区
+    uint8_t write_result[256];
     uint8_t read_result[256];
-    memset(write_result, 0, sizeof(write_result));
-    memset(read_result, 0, sizeof(read_result));
-    
-    std::cout << "=== ORAM ACCESS TEST START ===" << std::endl;
-    std::cout << "Test data: '" << test_data << "'" << std::endl;
-    std::cout << "Write data size: " << write_data.size() << std::endl;
-    
-    // 测试写入操作 - 提供结果缓冲区
-    sgx_status_t ecall_ret = SGX_SUCCESS;
-    sgx_status_t ret = ecall_oram_access(eid, &ecall_ret, 
-                                        1,  // WRITE operation
-                                        0,  // block index 0
-                                        write_data.data(), 
-                                        write_data.size(),
-                                        write_result,  // 提供结果缓冲区
-                                        sizeof(write_result));
-    
-    std::cout << "Write operation - sgx_ret: " << ret << ", ecall_ret: " << ecall_ret << std::endl;
-    
-    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
-        std::cerr << "ORAM write test failed" << std::endl;
-        return false;
-    }
-    
-    std::cout << "Write operation completed successfully" << std::endl;
-    
-    // 检查 WRITE 操作的返回数据
-    std::string write_return_string(reinterpret_cast<char*>(write_result));
-    std::cout << "Write operation returned: '" << write_return_string << "'" << std::endl;
-    
-    // 测试读取操作
-    ret = ecall_oram_access(eid, &ecall_ret,
-                           0,  // READ operation  
-                           0,  // block index 0
-                           nullptr,
-                           0,
-                           read_result,
-                           sizeof(read_result));
-    
-    std::cout << "Read operation - sgx_ret: " << ret << ", ecall_ret: " << ecall_ret << std::endl;
-    
-    if (ret == SGX_SUCCESS && ecall_ret == SGX_SUCCESS) {
-        // 检查读取结果
-        std::string read_string(reinterpret_cast<char*>(read_result));
-        std::cout << "Read result: '" << read_string << "'" << std::endl;
+ 
+    // 写入blocks
+    for(int i = 0; i < 5; i++) {
         
-        if (read_string == test_data) {
-            std::cout << "ORAM access test passed: write and read successful" << std::endl;
-            return true;
-        } else {
-            std::cerr << "ORAM read test failed: data mismatch" << std::endl;
+        memset(write_result, 0, sizeof(write_result));
+        sgx_status_t ecall_ret = SGX_SUCCESS;
+        std::cout<<"access write"<<std::endl;
+        sgx_status_t ret = ecall_oram_access(eid, &ecall_ret, 
+                                            1,  // WRITE
+                                            i,  
+                                            write_data.data(), 
+                                            write_data.size(),
+                                            write_result,  
+                                            sizeof(write_result));
+        
+        if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+            std::cerr << "Write failed at block " << i << std::endl;
             return false;
         }
-    } else {
-        std::cerr << "ORAM read test failed: operation failed" << std::endl;
-        return false;
+        
+        // // 每次写入后检查ServerStorage状态
+        // std::cout << "After writing block " << i << ":" << std::endl;
+        // for (int j = 0; j < 5; j++) {
+        //     checkServerStorageState(j, "AFTER_WRITE_" + std::to_string(i));
+        // }
     }
+    
+    // 读取blocks
+    for(int i = 0; i < 5; i++) {
+        std::cout << "\n=== READING BLOCK " << i << " =========================" << std::endl;
+        
+        memset(read_result, 0, sizeof(read_result));
+        sgx_status_t ecall_ret = SGX_SUCCESS;
+        sgx_status_t ret = ecall_oram_access(eid, &ecall_ret,
+                                            0,  // READ
+                                            i,  
+                                            nullptr,
+                                            0,
+                                            read_result,
+                                            sizeof(read_result));
+        
+        if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+            std::cerr << "Read failed at block " << i << std::endl;
+            return false;
+        }
+        
+        std::string read_string(reinterpret_cast<char*>(read_result));
+        std::cout << "Read block" << i << ": '" << read_string << "'" << std::endl;
+        
+        if (read_string != test_data) {
+            std::cerr << "Data mismatch at block " << i << std::endl;
+            return false;
+        }
+    }
+    
+    std::cout << "=== ORAM BULK ACCESS TEST COMPLETED ===" << std::endl;
+    return true;
 }
+

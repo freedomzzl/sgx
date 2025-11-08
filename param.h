@@ -19,6 +19,8 @@ extern int OramL;
 
 extern int numLeaves;
 
+extern int capacity;
+
 extern int blocksize;
 
 

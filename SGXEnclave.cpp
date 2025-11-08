@@ -238,3 +238,54 @@ sgx_status_t ecall_oram_evict() {
         return SGX_ERROR_UNEXPECTED;
     }
 }
+
+sgx_status_t ecall_test_ringoram_serialization() {
+    if (!enclave_initialized) {
+        return SGX_ERROR_UNEXPECTED;
+    }
+    
+    try {
+        // 在enclave内创建bucket并测试序列化
+        bucket test_bucket(realBlockEachbkt, dummyBlockEachbkt);
+        
+        // 添加测试数据
+        std::string test_data = "Enclave Test Data";
+        for (int i = 0; i < 3; i++) {
+            std::vector<char> block_data(test_data.begin(), test_data.end());
+            block real_block(i * 10, i, block_data);
+            test_bucket.blocks[i] = real_block;
+            test_bucket.ptrs[i] = i;
+            test_bucket.valids[i] = 1;
+        }
+        
+        // 测试序列化
+        std::vector<uint8_t> serialized = g_oram->serialize_bucket(test_bucket);
+        
+        // 测试反序列化
+        bucket deserialized = g_oram->deserialize_bucket(serialized.data(), serialized.size());
+        
+        // 验证结果
+        bool success = true;
+        for (int i = 0; i < 3; i++) {
+            if (test_bucket.blocks[i].GetBlockindex() != deserialized.blocks[i].GetBlockindex() ||
+                test_bucket.blocks[i].GetData() != deserialized.blocks[i].GetData()) {
+                success = false;
+                break;
+            }
+        }
+        
+        if (success) {
+            ocall_print_string("Enclave ringoram serialization test PASSED");
+        } else {
+            ocall_print_string("Enclave ringoram serialization test FAILED");
+        }
+        
+        return success ? SGX_SUCCESS : SGX_ERROR_UNEXPECTED;
+        
+    } catch (const std::exception& e) {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "Enclave serialization test exception: %s", e.what());
+        ocall_print_string(msg);
+        return SGX_ERROR_UNEXPECTED;
+    }
+}
