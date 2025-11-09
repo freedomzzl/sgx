@@ -29,8 +29,6 @@ ringoram::ringoram(int n, int cache_levels)
     enclave_crypto = nullptr;
 
     char msg[100];
-    snprintf(msg, sizeof(msg), "[ORAM-SGX] Tree initialized for SGX, N=%d", n);
-    ocall_print_string(msg);
 }
 
 // 使用 SGX 安全的随机数生成
@@ -261,10 +259,7 @@ std::vector<char> ringoram::decrypt_data(const std::vector<char>& encrypted_data
 vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
 {
     char msg[200];
-   
-    snprintf(msg, sizeof(msg), "Stash size before: %zu", stash.size());
-    ocall_print_string(msg);
-    
+
     if (blockindex < 0 || blockindex >= N) {
         ocall_print_string("ERROR: Invalid block index");
         return {};
@@ -273,70 +268,51 @@ vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
     int oldLeaf = positionmap[blockindex];
     positionmap[blockindex] = get_random();
 
-    snprintf(msg, sizeof(msg), "Position map: oldLeaf=%d, newLeaf=%d", oldLeaf, positionmap[blockindex]);
-    ocall_print_string(msg);
-
     // 1. 读取路径获取目标块
     block interestblock = ReadPath(oldLeaf, blockindex);
-    
-    snprintf(msg, sizeof(msg), "After ReadPath: blockindex=%d, isDummy=%d", 
-             interestblock.GetBlockindex(), interestblock.IsDummy());
-    ocall_print_string(msg);
-
+ 
     vector<char> blockdata;
 
     // 2. 处理读取到的块
     if (interestblock.GetBlockindex() == blockindex) {
         if (!interestblock.IsDummy()) {
             blockdata = decrypt_data(interestblock.GetData());
-            ocall_print_string("Block decrypted from path");
+
         }
         else {
             blockdata = interestblock.GetData();
-            ocall_print_string("Dummy block from path");
         }
     }
     else {
-        ocall_print_string("Block not in path, checking stash");
         bool found_in_stash = false;
         for (auto it = stash.begin(); it != stash.end(); ++it) {
             if (it->GetBlockindex() == blockindex) {
                 blockdata = it->GetData();
                 stash.erase(it);
                 found_in_stash = true;
-                ocall_print_string("Block found in stash");
                 break;
             }
         }
         if (!found_in_stash) {
-            ocall_print_string("Block not found anywhere, returning empty");
         }
     }
 
     // 4. 如果是WRITE操作，更新数据
     if (op == WRITE) {
-        ocall_print_string("WRITE operation, updating data");
         blockdata = data;
     }
 
     // 明文放入stash
     stash.emplace_back(positionmap[blockindex], blockindex, blockdata);
-    snprintf(msg, sizeof(msg), "Stash size after: %zu", stash.size());
-    ocall_print_string(msg);
 
     // 5. 路径管理和驱逐
     round = (round + 1) % EvictRound;
     if (round == 0) {
-        ocall_print_string("=== EVICTING PATH ===");
         EvictPath();
-        ocall_print_string("=== EVICTION COMPLETED ===");
     }
 
     EarlyReshuffle(oldLeaf);
 
-    snprintf(msg, sizeof(msg), "Returning data size: %zu", blockdata.size());
-    ocall_print_string(msg);
-    
     return blockdata;
 }
 
@@ -467,7 +443,7 @@ bucket ringoram::deserialize_bucket(const uint8_t* data, size_t size) {
 // ================================
 
 bucket ringoram::sgx_read_bucket(int position) {
-    const size_t BUFFER_SIZE = 4096;
+    const size_t BUFFER_SIZE = 65536;
     uint8_t buffer[BUFFER_SIZE];
     memset(buffer, 0, BUFFER_SIZE);
 
@@ -489,7 +465,7 @@ bucket ringoram::sgx_read_bucket(int position) {
 }
 
 void ringoram::sgx_write_bucket(int position, const bucket& bkt) {
-    const size_t BUFFER_SIZE = 4096;
+    const size_t BUFFER_SIZE = 65536;
 
     // 序列化
     auto serialized = serialize_bucket(bkt);
@@ -498,15 +474,15 @@ void ringoram::sgx_write_bucket(int position, const bucket& bkt) {
         throw std::runtime_error("Bucket serialization failed");
     }
 
-    // EDL 指定 size=4096，必须向 host 传递 4096 字节（不足时 pad，超出时报错）
+    
     if (serialized.size() > BUFFER_SIZE) {
         char errbuf[200];
         snprintf(errbuf, sizeof(errbuf), "SGX: serialized bucket too large: %zu > %zu", serialized.size(), BUFFER_SIZE);
         ocall_print_string(errbuf);
-        throw std::runtime_error("Serialized bucket larger than allowed buffer (4096)");
+        throw std::runtime_error("Serialized bucket larger than allowed buffer ");
     }
 
-    // 准备 4096 字节缓冲并复制序列化数据
+    // 准备 字节缓冲并复制序列化数据
     std::vector<uint8_t> sbuf(BUFFER_SIZE);
     memset(sbuf.data(), 0, BUFFER_SIZE);
     memcpy(sbuf.data(), serialized.data(), serialized.size());

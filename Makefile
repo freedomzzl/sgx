@@ -16,7 +16,7 @@ CC = gcc
 # ======================================
 
 # Enclave 专属源文件（在 Enclave 内运行的算法）
-ENCLAVE_SRC_CPP := SGXEnclave.cpp CryptoUtil.cpp NodeSerializer.cpp Node.cpp MBR.cpp Document.cpp ringoram.cpp Vocabulary.cpp Vector.cpp Query.cpp InvertedIndex.cpp RingoramStorage.cpp
+ENCLAVE_SRC_CPP := SGXEnclave.cpp CryptoUtil.cpp NodeSerializer.cpp Node.cpp MBR.cpp Document.cpp ringoram.cpp Vocabulary.cpp Vector.cpp Query.cpp InvertedIndex.cpp RingoramStorage.cpp IRTree.cpp
 ENCLAVE_SRC_C   := SGXEnclave_t.c
 
 # Host 专属源文件（在外部运行的服务）

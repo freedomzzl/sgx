@@ -22,10 +22,22 @@ public:
     bool initialize_external_storage(int capacity);
     // 加密功能测试
     bool testCrypto();
-
+    bool testNodeSerializer();
+    bool testRingOramStorage();
 
     bool testORAMBasic();
     bool testORAMAccess();
+
+    // IRTree 相关方法
+    bool initializeIRTree(int dims = 2, int min_cap = 2, int max_cap = 4);
+    bool bulkInsertFromFile(const std::string& filename);
+    std::vector<std::pair<int, double>> search(
+        const std::string& keywords,
+        double min_x, double min_y, double max_x, double max_y,
+        int k = 10, double alpha = 0.5);
+    bool insertDocument(
+        const std::string& text,
+        double min_x, double min_y, double max_x, double max_y);
     
     // 状态查询
     bool isInitialized() const { return initialized; }

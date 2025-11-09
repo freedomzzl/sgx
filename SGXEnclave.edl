@@ -7,7 +7,8 @@ enclave {
         public sgx_status_t ecall_initialize_enclave();
         public sgx_status_t ecall_test_enclave(int input_value, [out] int* output_value);
         public sgx_status_t ecall_test_crypto();
-        
+        public sgx_status_t ecall_test_nodeserializer();
+        public sgx_status_t ecall_test_ringoram_storage();
         
         // ORAM 相关的 ECALLs
         public sgx_status_t ecall_oram_initialize(int capacity);
@@ -19,21 +20,50 @@ enclave {
             [out, size=result_size] uint8_t* result,     // 读操作的结果
             size_t result_size
         );
-        public sgx_status_t ecall_oram_evict();
-        public sgx_status_t ecall_test_ringoram_serialization();
+
+        // IRTree 相关的 ECALLs
+        public sgx_status_t ecall_irtree_initialize(int dims, int min_cap, int max_cap);
+        public sgx_status_t ecall_irtree_bulk_insert([in, string] const char* filename);
+        public sgx_status_t ecall_irtree_search(
+            [in, string] const char* keywords,
+            [user_check] const double* spatial_scope,  
+            int k,
+            double alpha,
+            [user_check] int* result_count,            
+            [user_check] int* doc_ids,                 
+            [user_check] double* scores                
+        );
+        public sgx_status_t ecall_irtree_insert_document(
+            [in, string] const char* text,
+            [user_check] const double* location_min,   
+            [user_check] const double* location_max    
+        );
     };
     
     untrusted {
     void ocall_print_string([in, string] const char* str);
+
+    // 文件操作 OCALLs
+        sgx_status_t ocall_read_file(
+            [in, string] const char* filename,
+            [out, size=max_size] uint8_t* buffer,
+            size_t max_size,
+            [out] size_t* actual_size
+        );
+        
+        sgx_status_t ocall_get_file_size(
+            [in, string] const char* filename,
+            [out] size_t* file_size
+        );
     
     sgx_status_t ocall_read_bucket(
         int position,  
-        [out, size=4096] uint8_t* data
+        [out, size=65536] uint8_t* data
     );
     
     sgx_status_t ocall_write_bucket(
         int position,  
-        [in, size=4096] const uint8_t* data
+        [in, size=65536] const uint8_t* data
     );
 };
 };

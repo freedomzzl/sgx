@@ -2,11 +2,13 @@
 #include "SGXEnclave_u.h"
 #include "ringoram.h"
 #include "ServerStorage.h"
-#include"param.h"
+#include "param.h"
 #include <iostream>
 #include <cstring>
 #include <vector>
 #include <memory>
+#include <fstream>
+#include <chrono>
 
 using namespace std;
 
@@ -250,7 +252,7 @@ extern "C" sgx_status_t ocall_read_bucket(
         bucket bkt = g_external_storage->GetBucket(actual_position);
         std::vector<uint8_t> serialized = serialize_bucket(bkt);
         
-        const size_t BUFFER_SIZE = 4096;
+        const size_t BUFFER_SIZE = 65536;
         if (serialized.size() > BUFFER_SIZE) {
             std::cerr << "ERROR: Serialized data too large" << std::endl;
             return SGX_ERROR_INVALID_PARAMETER;
@@ -276,7 +278,7 @@ extern "C" sgx_status_t ocall_write_bucket(int position, const uint8_t* data) {
         }
         
         // 反序列化要写入的数据
-        bucket bkt_to_write = deserialize_bucket(data, 4096);
+        bucket bkt_to_write = deserialize_bucket(data, 65536);
         
         // 检查要写入的块
         int real_blocks_to_write = 0;
@@ -303,6 +305,66 @@ extern "C" sgx_status_t ocall_write_bucket(int position, const uint8_t* data) {
         
     } catch (const std::exception& e) {
         std::cerr << "Exception in ocall_write_bucket: " << e.what() << std::endl;
+        return SGX_ERROR_UNEXPECTED;
+    }
+}
+
+
+// 文件操作 OCALL 实现
+extern "C" sgx_status_t ocall_read_file(
+    const char* filename,
+    uint8_t* buffer,
+    size_t max_size,
+    size_t* actual_size) {
+    
+    try {
+        std::ifstream file(filename, std::ios::binary);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+            return SGX_ERROR_FILE_BAD_STATUS;
+        }
+        
+        // 获取文件大小
+        file.seekg(0, std::ios::end);
+        size_t file_size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        
+        if (file_size > max_size) {
+            std::cerr << "File too large: " << file_size << " > " << max_size << std::endl;
+            return SGX_ERROR_OUT_OF_MEMORY;
+        }
+        
+        // 读取文件内容
+        file.read(reinterpret_cast<char*>(buffer), file_size);
+        *actual_size = file.gcount();
+        
+        file.close();
+        
+        std::cout << "Read file: " << filename << " (" << *actual_size << " bytes)" << std::endl;
+        return SGX_SUCCESS;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "File read exception: " << e.what() << std::endl;
+        return SGX_ERROR_UNEXPECTED;
+    }
+}
+
+extern "C" sgx_status_t ocall_get_file_size(const char* filename, size_t* file_size) {
+    try {
+        std::ifstream file(filename, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file for size check: " << filename << std::endl;
+            return SGX_ERROR_FILE_BAD_STATUS;
+        }
+        
+        *file_size = file.tellg();
+        file.close();
+        
+        std::cout << "File size: " << filename << " = " << *file_size << " bytes" << std::endl;
+        return SGX_SUCCESS;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "File size check exception: " << e.what() << std::endl;
         return SGX_ERROR_UNEXPECTED;
     }
 }
@@ -497,6 +559,178 @@ bool SGXEnclaveWrapper::testORAMAccess() {
     }
     
     std::cout << "=== ORAM BULK ACCESS TEST COMPLETED ===" << std::endl;
+    return true;
+}
+
+bool SGXEnclaveWrapper::testNodeSerializer() {
+    if (!initialized) {
+        throw std::runtime_error("Enclave not initialized");
+    }
+    
+    sgx_status_t ecall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ecall_test_nodeserializer(eid, &ecall_ret);
+    
+    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+        std::cerr << "NodeSerializer test failed: sgx_ret=" << std::hex << ret 
+                  << ", ecall_ret=" << ecall_ret << std::endl;
+        return false;
+    }
+    
+    std::cout << "NodeSerializer test successful" << std::endl;
+    return true;
+}
+
+bool SGXEnclaveWrapper::testRingOramStorage() {
+    if (!initialized) {
+        throw std::runtime_error("Enclave not initialized");
+    }
+    
+    // 确保ORAM已经初始化
+    if (!initialize_external_storage(capacity)) {
+        return false;
+    }
+    
+    sgx_status_t ecall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ecall_test_ringoram_storage(eid, &ecall_ret);
+    
+    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+        std::cerr << "RingOramStorage test failed: sgx_ret=" << std::hex << ret 
+                  << ", ecall_ret=" << ecall_ret << std::endl;
+        return false;
+    }
+    
+    std::cout << "RingOramStorage test successful" << std::endl;
+    return true;
+}
+
+bool SGXEnclaveWrapper::initializeIRTree(int dims, int min_cap, int max_cap) {
+    if (!initialized) {
+        throw std::runtime_error("Enclave not initialized");
+    }
+    
+    if (!initialize_external_storage(capacity)) {
+        return false;
+    }
+
+    sgx_status_t ecall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ecall_irtree_initialize(eid, &ecall_ret, dims, min_cap, max_cap);
+    
+    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+        std::cerr << "IRTree initialization failed: sgx_ret=" << std::hex << ret 
+                  << ", ecall_ret=" << ecall_ret << std::endl;
+        return false;
+    }
+    
+    std::cout << "IRTree initialized successfully" << std::endl;
+    return true;
+}
+
+bool SGXEnclaveWrapper::bulkInsertFromFile(const std::string& filename) {
+    if (!initialized) {
+        throw std::runtime_error("Enclave not initialized");
+    }
+    
+    sgx_status_t ecall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ecall_irtree_bulk_insert(eid, &ecall_ret, filename.c_str());
+    
+    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+        std::cerr << "Bulk insert failed: sgx_ret=" << std::hex << ret 
+                  << ", ecall_ret=" << ecall_ret << std::endl;
+        return false;
+    }
+    
+    std::cout << "Bulk insert completed successfully" << std::endl;
+    return true;
+}
+
+std::vector<std::pair<int, double>> SGXEnclaveWrapper::search(
+    const std::string& keywords,
+    double min_x, double min_y, double max_x, double max_y,
+    int k, double alpha) {
+    
+    std::cout << "=== ENTERING SGXEnclaveWrapper::search ===" << std::endl;
+    
+    if (!initialized) {
+        std::cerr << "ERROR: Enclave not initialized" << std::endl;
+        throw std::runtime_error("Enclave not initialized");
+    }
+    
+    std::cout << "Enclave is initialized, eid: " << eid << std::endl;
+    
+    std::vector<std::pair<int, double>> results;
+    
+    // 参数验证
+    if (keywords.empty()) {
+        std::cout << "WARNING: Empty keywords" << std::endl;
+        return results;
+    }
+    
+    std::cout << "Keywords: '" << keywords << "'" << std::endl;
+    std::cout << "Spatial scope: [" << min_x << "," << min_y << "] to [" << max_x << "," << max_y << "]" << std::endl;
+    std::cout << "k: " << k << ", alpha: " << alpha << std::endl;
+    
+    // 准备空间范围数组
+    double spatial_scope[4] = {min_x, min_y, max_x, max_y};
+    int result_count = 0;
+    std::vector<int> doc_ids(k, -1);
+    std::vector<double> scores(k, 0.0);
+    
+    std::cout << "Before ECALL call - preparing parameters..." << std::endl;
+    
+    sgx_status_t ecall_ret = SGX_SUCCESS;
+    sgx_status_t ret = SGX_SUCCESS;
+    
+    std::cout << "Calling ecall_irtree_search..." << std::endl;
+    
+    // 直接调用，不检查返回值先
+    ret = ecall_irtree_search(eid, &ecall_ret,
+        keywords.c_str(), spatial_scope, k, alpha,
+        &result_count, doc_ids.data(), scores.data());
+    
+    std::cout << "After ECALL call - ret: " << ret << ", ecall_ret: " << ecall_ret << std::endl;
+    
+    if (ret != SGX_SUCCESS) {
+        std::cerr << "ECALL failed at SGX level: " << ret << std::endl;
+        throw std::runtime_error("ECALL failed at SGX level: " + std::to_string(ret));
+    }
+    
+    if (ecall_ret != SGX_SUCCESS) {
+        std::cerr << "ECALL failed at enclave level: " << ecall_ret << std::endl;
+        throw std::runtime_error("ECALL failed at enclave level: " + std::to_string(ecall_ret));
+    }
+    
+    std::cout << "ECALL succeeded, result_count: " << result_count << std::endl;
+    
+    // 转换结果
+    for (int i = 0; i < result_count; i++) {
+        results.emplace_back(doc_ids[i], scores[i]);
+    }
+    
+    std::cout << "Search completed with " << results.size() << " results" << std::endl;
+    return results;
+}
+
+bool SGXEnclaveWrapper::insertDocument(
+    const std::string& text,
+    double min_x, double min_y, double max_x, double max_y) {
+    
+    if (!initialized) {
+        throw std::runtime_error("Enclave not initialized");
+    }
+    
+    double location_min[2] = {min_x, min_y};
+    double location_max[2] = {max_x, max_y};
+    
+    sgx_status_t ecall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ecall_irtree_insert_document(eid, &ecall_ret,
+        text.c_str(), location_min, location_max);
+    
+    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
+        std::cerr << "Document insertion failed: sgx_ret=" << std::hex << ret 
+                  << ", ecall_ret=" << ecall_ret << std::endl;
+        return false;
+    }
+    
     return true;
 }
 
