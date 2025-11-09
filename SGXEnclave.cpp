@@ -85,59 +85,7 @@ sgx_status_t ecall_test_crypto() {
     return SGX_SUCCESS;
 }
 
-// ================================
-// NodeSerializer 测试函数
-// ================================
 
-sgx_status_t ecall_test_nodeserializer() {
-    if (!enclave_initialized) {
-        return SGX_ERROR_UNEXPECTED;
-    }
-    
-    // 创建测试节点
-    MBR test_mbr({10.5, 20.3}, {15.2, 25.8});
-    auto test_node = std::make_shared<Node>(123, Node::LEAF, 2, test_mbr);
-    
-    // 创建测试文档
-    MBR doc_mbr({11.0, 21.0}, {12.0, 22.0});
-    auto test_doc = std::make_shared<Document>(456, doc_mbr, "Test document content");
-    test_node->addDocument(test_doc);
-    
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Testing NodeSerializer with node_id=%d", test_node->getId());
-    ocall_print_string(msg);
-    
-    // 测试序列化
-    std::vector<uint8_t> serialized_data;
-    sgx_status_t ret = NodeSerializer::serialize(*test_node, serialized_data);
-    
-    if (ret != SGX_SUCCESS) {
-        snprintf(msg, sizeof(msg), "Node serialization failed: %d", ret);
-        ocall_print_string(msg);
-        return ret;
-    }
-    
-    snprintf(msg, sizeof(msg), "Node serialization successful. Size: %zu bytes", 
-             serialized_data.size());
-    ocall_print_string(msg);
-    
-    // 测试反序列化
-    std::shared_ptr<Node> deserialized_node;
-    ret = NodeSerializer::deserialize(serialized_data, deserialized_node);
-    
-    if (ret != SGX_SUCCESS || !deserialized_node) {
-        snprintf(msg, sizeof(msg), "Node deserialization failed: %d", ret);
-        ocall_print_string(msg);
-        return ret;
-    }
-    
-    snprintf(msg, sizeof(msg), "Node deserialization successful. Node ID: %d", 
-             deserialized_node->getId());
-    ocall_print_string(msg);
-    
-    ocall_print_string("NodeSerializer test passed successfully!");
-    return SGX_SUCCESS;
-}
 
 // ================================
 // ORAM ECALL 实现
@@ -197,15 +145,11 @@ sgx_status_t ecall_oram_access(int operation_type, int block_index,
         
         // 执行 ORAM 访问
         std::vector<char> result_vec = g_oram->access(block_index, op, data_vec);
-        
-        snprintf(msg, sizeof(msg), "ORAM access completed, result size=%zu", result_vec.size());
-        ocall_print_string(msg);
-        
+       
         // 返回结果
         if (result && result_size >= result_vec.size()) {
             memcpy(result, result_vec.data(), result_vec.size());
-            snprintf(msg, sizeof(msg), "Result copied to buffer");
-            ocall_print_string(msg);
+          
         } else if (!result_vec.empty()) {
             snprintf(msg, sizeof(msg), "ERROR: Result buffer too small: need %zu, got %zu", 
                      result_vec.size(), result_size);

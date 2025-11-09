@@ -400,23 +400,7 @@ bool SGXEnclaveWrapper::testCrypto() {
 }
 
 
-bool SGXEnclaveWrapper::testNodeSerializer() {
-    if (!initialized) {
-        throw std::runtime_error("Enclave not initialized");
-    }
-    
-    sgx_status_t ecall_ret = SGX_SUCCESS;
-    sgx_status_t ret = ecall_test_nodeserializer(eid, &ecall_ret);
-    
-    if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
-        std::cerr << "NodeSerializer test failed: sgx_ret=" << std::hex << ret 
-                  << ", ecall_ret=" << ecall_ret << std::endl;
-        return false;
-    }
-    
-    std::cout << "NodeSerializer test passed successfully!" << std::endl;
-    return true;
-}
+
 
 bool SGXEnclaveWrapper::testORAMBasic() {
     if (!initialized) {
@@ -430,7 +414,7 @@ bool SGXEnclaveWrapper::testORAMBasic() {
     
     // 初始化 Enclave 内的 ORAM
     sgx_status_t ecall_ret = SGX_SUCCESS;
-    sgx_status_t ret = ecall_oram_initialize(eid, &ecall_ret, 100);
+    sgx_status_t ret = ecall_oram_initialize(eid, &ecall_ret, totalnumRealblock);
     
     if (ret != SGX_SUCCESS || ecall_ret != SGX_SUCCESS) {
         std::cerr << "ORAM initialization failed: sgx_ret=" << std::hex << ret 
@@ -459,7 +443,7 @@ bool SGXEnclaveWrapper::testORAMAccess() {
     uint8_t read_result[256];
  
     // 写入blocks
-    for(int i = 0; i < 5; i++) {
+    for(int i = 0; i < 500; i++) {
         
         memset(write_result, 0, sizeof(write_result));
         sgx_status_t ecall_ret = SGX_SUCCESS;
@@ -485,7 +469,7 @@ bool SGXEnclaveWrapper::testORAMAccess() {
     }
     
     // 读取blocks
-    for(int i = 0; i < 5; i++) {
+    for(int i = 0; i < 500; i++) {
         std::cout << "\n=== READING BLOCK " << i << " =========================" << std::endl;
         
         memset(read_result, 0, sizeof(read_result));

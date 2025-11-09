@@ -7,7 +7,7 @@ enclave {
         public sgx_status_t ecall_initialize_enclave();
         public sgx_status_t ecall_test_enclave(int input_value, [out] int* output_value);
         public sgx_status_t ecall_test_crypto();
-        public sgx_status_t ecall_test_nodeserializer();
+        
         
         // ORAM 相关的 ECALLs
         public sgx_status_t ecall_oram_initialize(int capacity);

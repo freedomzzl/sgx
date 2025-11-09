@@ -23,8 +23,6 @@ public:
     // 加密功能测试
     bool testCrypto();
 
-     // NodeSerializer功能测试
-    bool testNodeSerializer();
 
     bool testORAMBasic();
     bool testORAMAccess();

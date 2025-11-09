@@ -1,20 +1,24 @@
 #include "MBR.h"
 #include <algorithm>
-#include <cmath>
-
-
-// SGX环境下的简单断言 - 静默失败
-#define MBR_ASSERT(condition) \
-    if (!(condition)) { \
-        return; \
-    }
+#include <cstdio>  
+#include <cstring>
 
 MBR::MBR(const std::vector<double>& min, const std::vector<double>& max)
     : min_coords(min), max_coords(max), cached_area(-1.0), area_calculated(false) {
-    MBR_ASSERT(min.size() == max.size());
+    
+    if (min.size() != max.size()) {
+        // 如果维度不匹配，使用默认值
+        min_coords = std::vector<double>{0.0, 0.0};
+        max_coords = std::vector<double>{0.0, 0.0};
+        return;
+    }
     
     for (size_t i = 0; i < min.size(); i++) {
-        MBR_ASSERT(min[i] <= max[i]);
+        if (min[i] > max[i]) {
+            // 如果min>max，交换它们
+            min_coords[i] = max[i];
+            max_coords[i] = min[i];
+        }
     }
 }
 
@@ -30,13 +34,17 @@ double MBR::area() const {
 }
 
 void MBR::expand(const MBR& other) {
-    MBR_ASSERT(other.min_coords.size() == min_coords.size());
+    if (other.min_coords.size() != min_coords.size()) {
+        // 维度不匹配，直接返回
+        return;
+    }
 
     for (size_t i = 0; i < min_coords.size(); i++) {
         min_coords[i] = std::min(min_coords[i], other.min_coords[i]);
         max_coords[i] = std::max(max_coords[i], other.max_coords[i]);
     }
 
+    // 清除缓存
     cached_area = -1.0;
     area_calculated = false;
 }
@@ -65,26 +73,25 @@ bool MBR::overlaps(const MBR& other) const {
 
 double MBR::minDistance(const std::vector<double>& point, int p_norm) const {
     if (point.size() != min_coords.size()) {
-        // 返回一个大的安全值
-        return 1e308;  // 使用数值而不是std::numeric_limits
+        // 维度不匹配，返回一个很大的距离
+        return 1e9;
     }
 
     double distance = 0.0;
 
-    if (p_norm == 2) {
+    if (p_norm == 2) { // Euclidean distance
         for (size_t i = 0; i < point.size(); i++) {
             if (point[i] < min_coords[i]) {
-                double diff = min_coords[i] - point[i];
-                distance += diff * diff;
+                distance += std::pow(min_coords[i] - point[i], 2);
             }
             else if (point[i] > max_coords[i]) {
-                double diff = point[i] - max_coords[i];
-                distance += diff * diff;
+                distance += std::pow(point[i] - max_coords[i], 2);
             }
+            // else point is within bounds for this dimension, no distance
         }
         return std::sqrt(distance);
     }
-    else {
+    else { // Manhattan distance (p_norm = 1) or other
         for (size_t i = 0; i < point.size(); i++) {
             if (point[i] < min_coords[i]) {
                 distance += min_coords[i] - point[i];
@@ -95,4 +102,66 @@ double MBR::minDistance(const std::vector<double>& point, int p_norm) const {
         }
         return distance;
     }
+}
+
+size_t MBR::getStringLength() const {
+    // 估算字符串长度
+    size_t length = 20; // "MBR[min=(), max=()]" 的基础长度
+    
+    // 每个坐标的估算长度（包括分隔符）
+    for (size_t i = 0; i < min_coords.size(); i++) {
+        length += 30; // 每个坐标值估算15字符，包括分隔符
+    }
+    
+    return length;
+}
+
+int MBR::toString(char* buffer, size_t buffer_size) const {
+    if (!buffer || buffer_size == 0) {
+        return -1;
+    }
+    
+    int written = 0;
+    
+    // 写入 "MBR[min=("
+    written += snprintf(buffer + written, buffer_size - written, "MBR[min=(");
+    if (written >= buffer_size) return written;
+    
+    // 写入 min 坐标
+    for (size_t i = 0; i < min_coords.size(); i++) {
+        if (i > 0) {
+            written += snprintf(buffer + written, buffer_size - written, ", ");
+            if (written >= buffer_size) return written;
+        }
+        
+        written += snprintf(buffer + written, buffer_size - written, "%.2f", min_coords[i]);
+        if (written >= buffer_size) return written;
+    }
+    
+    // 写入 "), max=("
+    written += snprintf(buffer + written, buffer_size - written, "), max=(");
+    if (written >= buffer_size) return written;
+    
+    // 写入 max 坐标
+    for (size_t i = 0; i < max_coords.size(); i++) {
+        if (i > 0) {
+            written += snprintf(buffer + written, buffer_size - written, ", ");
+            if (written >= buffer_size) return written;
+        }
+        
+        written += snprintf(buffer + written, buffer_size - written, "%.2f", max_coords[i]);
+        if (written >= buffer_size) return written;
+    }
+    
+    // 写入结束部分
+    written += snprintf(buffer + written, buffer_size - written, ")]");
+    
+    // 确保字符串以null结尾
+    if (written < buffer_size) {
+        buffer[written] = '\0';
+    } else {
+        buffer[buffer_size - 1] = '\0';
+    }
+    
+    return written;
 }
