@@ -103,7 +103,7 @@ public:
 static SGXMutex g_cache_mutex;
 
 
-// 修改构造函数
+// 构造函数
 IRTree::IRTree(std::shared_ptr<StorageInterface> storage_impl,
     int dims, int min_cap, int max_cap)
     : storage(storage_impl), dimensions(dims), min_capacity(min_cap),
@@ -182,78 +182,46 @@ int IRTree::createNewNode(Node::Type type, int level, const MBR& mbr) {
 }
 
 
-double IRTree::computeNodeRelevance(std::shared_ptr<Node> node, const std::vector<std::string>& keywords, const MBR& spatial_scope, double alpha) const {
+double IRTree::computeNodeRelevance(std::shared_ptr<Node> node, const std::vector<std::string>& keywords, const MBR& spatial_scope, double alpha) const
+{
     if (!node) return 0.0;
 
-    char msg[256];
-    
     // 计算空间相关性
     double spatial_rel = computeSpatialRelevance(node->getMBR(), spatial_scope);
-    snprintf(msg, sizeof(msg), "Spatial relevance for node %d: %.6f", node->getId(), spatial_rel);
-    PRINT(msg);
-    
-    if (spatial_rel == 0.0) {
-        PRINT("Spatial relevance is 0, returning 0");
-        return 0.0;
-    }
+    if (spatial_rel == 0.0) return 0.0;
 
-    // 计算文本相关性上界
+    // 计算文本相关性
     double text_upper_bound = 0.0;
     int total_docs = global_index.getTotalDocuments();
     int valid_keywords = 0;
 
-    snprintf(msg, sizeof(msg), "Total documents in global index: %d", total_docs);
-    PRINT(msg);
-
     for (const auto& keyword : keywords) {
-        // 获取节点中该词的最大词频
+        // 获取节点中该词的最大词频（使用你已有的TF_max）
         int tf_max = node->getMaxTermFrequency(keyword);
-        snprintf(msg, sizeof(msg), "Keyword '%s': tf_max=%d", keyword.c_str(), tf_max);
-        PRINT(msg);
-        
-        if (tf_max == 0) continue;
+        if (tf_max == 0) continue;  // 节点中没有这个词，跳过
 
         // 获取全局文档频率
         int term_id = vocab.getTermId(keyword);
-        snprintf(msg, sizeof(msg), "Term ID for '%s': %d", keyword.c_str(), term_id);
-        PRINT(msg);
-        
-        if (term_id == -1) continue;
+        if (term_id == -1) continue;  // 词汇表中不存在
 
         int global_df = global_index.getDocumentFrequency(term_id);
-        snprintf(msg, sizeof(msg), "Global DF for term %d: %d", term_id, global_df);
-        PRINT(msg);
-        
         if (global_df == 0) continue;
 
         // 计算该词在节点中可能达到的最大TF-IDF值
         double max_tfidf = Vector::computeTFIDFWeight(tf_max, global_df, total_docs);
-        snprintf(msg, sizeof(msg), "Max TF-IDF for '%s': %.6f", keyword.c_str(), max_tfidf);
-        PRINT(msg);
-        
         text_upper_bound += max_tfidf;
         valid_keywords++;
     }
 
-    snprintf(msg, sizeof(msg), "Text upper bound: %.6f, valid keywords: %d", text_upper_bound, valid_keywords);
-    PRINT(msg);
-
     // 如果没有匹配的关键词，文本相关性为0
-    if (valid_keywords == 0) {
-        PRINT("No valid keywords, returning 0");
-        return 0.0;
-    }
+    if (valid_keywords == 0) return 0.0;
 
-    // 归一化到[0,1]范围
+    // 归一化到[0,1]范围 - 除以查询词数量
     text_upper_bound = std::min(1.0, text_upper_bound / keywords.size());
-    snprintf(msg, sizeof(msg), "Normalized text upper bound: %.6f", text_upper_bound);
-    PRINT(msg);
+
    
     //计算综合相关性
     double joint_relevance = computeJointRelevance(text_upper_bound, spatial_rel, alpha);
-    snprintf(msg, sizeof(msg), "Joint relevance: %.6f (text=%.6f, spatial=%.6f, alpha=%.2f)", 
-             joint_relevance, text_upper_bound, spatial_rel, alpha);
-    PRINT(msg);
 
     return joint_relevance;
 }
@@ -264,8 +232,6 @@ void IRTree::processLeafNode(std::shared_ptr<Node> leaf_node,
     double alpha,
     std::vector<TreeHeapEntry>& results) const {
 
-
-
     if (!leaf_node || leaf_node->getType() != Node::LEAF) {
 
         return;
@@ -273,17 +239,13 @@ void IRTree::processLeafNode(std::shared_ptr<Node> leaf_node,
 
     auto documents = leaf_node->getDocuments();
 
-
     // 遍历叶子节点中的所有文档
     for (const auto& doc : documents) {
-
 
         // 检查空间相关性 - 文档位置是否在查询范围内
         bool spatial_overlap = doc->getLocation().overlaps(spatial_scope);
 
-
         if (!spatial_overlap) {
-
             continue;
         }
 
@@ -297,20 +259,14 @@ void IRTree::processLeafNode(std::shared_ptr<Node> leaf_node,
                 break;
             }
         }
-
-
-
         // 如果满足空间和文本条件，计算综合相关性并加入结果
         if (has_all_keywords) {
             double spatial_rel = computeSpatialRelevance(doc->getLocation(), spatial_scope);
             double text_rel = computeTextRelevance(*doc, keywords);
             double joint_rel = computeJointRelevance(text_rel, spatial_rel, alpha);
 
-
-
             results.push_back(TreeHeapEntry(doc, joint_rel));
         }
-
     }
 }
 
@@ -372,6 +328,7 @@ void IRTree::processInternalNode(std::shared_ptr<Node> internal_node,
     }
 }
 
+
 // 使用路径处理内部节点
 void IRTree::processInternalNodeWithPath(std::shared_ptr<Node> internal_node,
     int parent_path,
@@ -424,9 +381,10 @@ void IRTree::processInternalNodeWithPath(std::shared_ptr<Node> internal_node,
         // 4. 只有通过所有检查的节点才实际加载
         auto child_node = accessNodeByPath(child_path);
         if (!child_node) {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "Failed to load child node %zu using path %s", child_id, child_path);
-            PRINT(msg);
+            std::string msg = "Failed to load child node " + std::to_string(child_id) +
+                  " using path " + std::to_string(child_path);
+            ocall_print_string(msg.c_str());
+
             continue;
         }
 
@@ -470,13 +428,6 @@ double IRTree::computeTextRelevance(const Document& doc, const std::vector<std::
 double IRTree::computeSpatialRelevance(const MBR& doc_location, const MBR& query_scope) const {
     // 首先检查是否重叠
     if (!doc_location.overlaps(query_scope)) {
-        char msg[256];
-        snprintf(msg, sizeof(msg), "MBR does not overlap: [%.6f,%.6f]-[%.6f,%.6f] vs [%.6f,%.6f]-[%.6f,%.6f]",
-                 doc_location.getMin()[0], doc_location.getMin()[1],
-                 doc_location.getMax()[0], doc_location.getMax()[1],
-                 query_scope.getMin()[0], query_scope.getMin()[1],
-                 query_scope.getMax()[0], query_scope.getMax()[1]);
-        PRINT(msg);
         return 0.0;
     }
 
@@ -511,9 +462,8 @@ int IRTree::chooseLeaf(const MBR& mbr) {
     auto current = loadNode(current_id);
 
     if (!current) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Failed to load root node %zu", current_id);
-        PRINT(msg);
+        std::string msg = "Failed to load root node " + std::to_string(current_id);
+        ocall_print_string(msg.c_str());
         return -1;
     }
 
@@ -767,6 +717,7 @@ void IRTree::splitNode(int node_id) {
     }
 
 }
+
 // 初始化递归位置映射
 void IRTree::initializeRecursivePositionMap() {
     // 从根节点开始递归分配路径
@@ -786,7 +737,8 @@ void IRTree::initializeRecursivePositionMap() {
 int IRTree::assignPathRecursively(int node_id) {
     auto node = loadNode(node_id);
     if (!node) {
-        PRINT("Failed to load node for path assignment");
+        std::string msg = "Failed to load node " + std::to_string(node_id) + " for path assignment";
+        ocall_print_string(msg.c_str());
         return -1;
     }
 
@@ -825,7 +777,7 @@ int IRTree::getRandomLeafPath() const {
     return SGXRandom::getRandom(0, numLeaves - 1);
 }
 
-// 根节点路径管理（简化实现，后面需要集成到RingOramStorage）
+// 根节点路径管理
 int IRTree::getRootPath() const {
     if (!storage) {
         PRINT("Storage not available for root path access");
@@ -853,7 +805,6 @@ void IRTree::setRootPath(int path) {
     auto path_oram_storage = std::dynamic_pointer_cast<RingOramStorage>(storage);
     if (path_oram_storage) {
         path_oram_storage->setRootPath(path);
-        // 移除调试打印，让 RingOramStorage 处理日志
     }
     else {
         PRINT("Storage is not RingOramStorage, cannot set root path");
@@ -863,27 +814,31 @@ void IRTree::setRootPath(int path) {
 // 递归访问节点（使用路径而不是节点ID）
 std::shared_ptr<Node> IRTree::accessNodeByPath(int path) {
     if (!storage) {
-        PRINT("Storage not available for path access");
+        ocall_print_string("Storage not available for path access");
         return nullptr;
     }
-
-    // 动态转换到RingOramStorage来使用路径访问
+    
+    // 动态转换到 RingOramStorage 以使用路径访问
     auto path_oram_storage = std::dynamic_pointer_cast<RingOramStorage>(storage);
     if (path_oram_storage) {
         auto node_data = path_oram_storage->accessByPath(path);
         if (node_data.empty()) {
+            std::string msg = "Failed to access node data for path " + std::to_string(path);
+            ocall_print_string(msg.c_str());
             return nullptr;
         }
 
         // 反序列化节点数据
         auto node = NodeSerializer::deserialize(node_data);
         if (!node) {
+            std::string msg = "Failed to deserialize node from path " + std::to_string(path);
+            ocall_print_string(msg.c_str());
             return nullptr;
         }
 
         return node;
-    }
-    else {
+    } else {
+        ocall_print_string("Storage is not RingOramStorage, cannot use path-based access");
         return nullptr;
     }
 }
@@ -956,9 +911,6 @@ std::vector<TreeHeapEntry> IRTree::search(const std::vector<std::string>& keywor
 
     // 获取根节点路径
     int root_path = getRootPath();
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Root path: %d", root_path);
-    PRINT(msg);
     if (root_path == -1) {
         PRINT("Failed to get root path for search");
         return results;
@@ -967,38 +919,16 @@ std::vector<TreeHeapEntry> IRTree::search(const std::vector<std::string>& keywor
     // 加载根节点（使用路径访问）
     auto root_node = accessNodeByPath(root_path);
     if (!root_node) {
-        PRINT("Failed to load root node using path");
+        std::string msg = "Failed to load root node using path " + std::to_string(root_path);
+        ocall_print_string(msg.c_str());
         return results;
     }
-    
-    snprintf(msg, sizeof(msg), "Root node loaded: id=%d, type=%d, level=%d", 
-             root_node->getId(), root_node->getType(), root_node->getLevel());
-    PRINT(msg);
-
-    snprintf(msg, sizeof(msg), "Search scope: [%.6f,%.6f] to [%.6f,%.6f]", 
-         spatial_scope.getMin()[0], spatial_scope.getMin()[1],
-         spatial_scope.getMax()[0], spatial_scope.getMax()[1]);
-    PRINT(msg);
-
-    // 检查根节点的MBR是否与搜索范围重叠
-    MBR root_mbr = root_node->getMBR();
-    snprintf(msg, sizeof(msg), "Root MBR: [%.6f,%.6f] to [%.6f,%.6f]", 
-         root_mbr.getMin()[0], root_mbr.getMin()[1],
-         root_mbr.getMax()[0], root_mbr.getMax()[1]);
-    PRINT(msg);
-
-bool overlaps = root_mbr.overlaps(spatial_scope);
-snprintf(msg, sizeof(msg), "Root overlaps search scope: %s", overlaps ? "YES" : "NO");
-PRINT(msg);
 
     // 使用优先队列进行最佳优先搜索（现在包含路径信息）
     std::priority_queue<TreeHeapEntry, std::vector<TreeHeapEntry>, TreeHeapComparator> queue;
 
     // 计算根节点的相关性并加入队列（包含路径信息）
     double root_relevance = computeNodeRelevance(root_node, keywords, spatial_scope, alpha);
-
-    snprintf(msg, sizeof(msg), "Root node relevance: %.6f", root_relevance);
-    PRINT(msg);
     if (root_relevance > 0) {
         queue.push(TreeHeapEntry(root_node, root_path, root_relevance));
     }
@@ -1012,40 +942,22 @@ PRINT(msg);
         queue.pop();
         nodes_visited++;
 
-        snprintf(msg, sizeof(msg), "Processing entry %d: type=%s, score=%.6f", 
-                nodes_visited, current.isNode() ? "NODE" : "DOC", current.score);
-        PRINT(msg);
-
         if (current.isData()) {
             // 找到文档，加入结果
             results.push_back(current);
-
-            snprintf(msg, sizeof(msg), "Found document: id=%d", current.document->getId());
-            PRINT(msg);
         }
         else if (current.isNode()) {
             auto node = current.node;
-
-            snprintf(msg, sizeof(msg), "Processing node: id=%d, type=%d, level=%d", 
-                    node->getId(), node->getType(), node->getLevel());
-            PRINT(msg);
 
             if (node->getType() == Node::LEAF) {
                 // 处理叶子节点 - 检查实际文档
                 int prev_results = results.size();
                 processLeafNode(node, keywords, spatial_scope, alpha, results);
                 documents_checked += (results.size() - prev_results);
-
-                snprintf(msg, sizeof(msg), "Leaf node processed: %zu -> %zu documents", 
-                        prev_results, results.size());
-                PRINT(msg);
             }
             else {
                 // 处理内部节点 - 使用递归位置映射获取子节点
-                PRINT("Processing internal node with path...");
                 processInternalNodeWithPath(node, current.path, keywords, spatial_scope, alpha, queue);
-                snprintf(msg, sizeof(msg), "Queue size after processing: %zu", queue.size());
-                PRINT(msg);
             }
         }
     }
@@ -1063,7 +975,7 @@ PRINT(msg);
     }
 
     PRINT("=== SEARCH COMPLETED ===");
-
+    char msg[256];
     snprintf(msg, sizeof(msg), "  Nodes visited: %zu", nodes_visited);
     PRINT(msg);
 
@@ -1075,6 +987,22 @@ PRINT(msg);
 
     snprintf(msg, sizeof(msg), "  Final results: %zu", results.size());
     PRINT(msg);
+
+    for (size_t i = 0; i < results.size(); ++i) {
+    const auto& entry = results[i];
+    int doc_id = entry.document ? entry.document->getId() : -1;
+    double score = entry.score;
+
+    std::string text = entry.document ? entry.document->getText() : "[NULL]";
+    
+    
+    if (text.size() > 200) text = text.substr(0, 200) + "...";
+
+    snprintf(msg, sizeof(msg),
+             "  #%zu: DocID=%d | Score=%.6f | Text: %s",
+             i + 1, doc_id, score, text.c_str());
+    PRINT(msg);
+    }
 
     return results;
 }
@@ -1222,12 +1150,7 @@ void IRTree::optimizedBulkInsertDocuments(const std::vector<std::tuple<std::stri
 }
 
 void IRTree::bulkBuildGlobalIndex(const std::vector<std::shared_ptr<Document>>& documents) {
-    PRINT("=== BUILDING GLOBAL INDEX ===");
-    
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Processing %zu documents", documents.size());
-    PRINT(msg);
-
+   
     // 批量词汇表构建 - 先收集所有词汇
     std::unordered_map<std::string, int> term_frequencies;
 
@@ -1255,24 +1178,10 @@ void IRTree::bulkBuildGlobalIndex(const std::vector<std::shared_ptr<Document>>& 
         }
     }
 
-    snprintf(msg, sizeof(msg), "Collected %zu unique terms", term_frequencies.size());
-    PRINT(msg);
-
-    // 显示一些词汇
-    PRINT("Sample terms in vocabulary:");
-    int count = 0;
-    for (const auto& term : term_frequencies) {
-        if (count++ < 10) {
-            snprintf(msg, sizeof(msg), "  '%s': freq=%d", term.first.c_str(), term.second);
-            PRINT(msg);
-        }
-    }
 
     // 批量添加到词汇表
     for (const auto& term : term_frequencies) {
-        int term_id = vocab.getTermId(term.first);
-        snprintf(msg, sizeof(msg), "Term '%s' -> ID %d", term.first.c_str(), term_id);
-        PRINT(msg);
+        int term_id = vocab.addTerm(term.first);
     }
 
     // 批量构建文档向量
@@ -1309,9 +1218,6 @@ void IRTree::bulkBuildGlobalIndex(const std::vector<std::shared_ptr<Document>>& 
         
         global_index.addDocument(doc->getId(), doc_vector);
     }
-
-    snprintf(msg, sizeof(msg), "Global index built for %zu documents", documents.size());
-    PRINT(msg);
 }
 
 void IRTree::bulkInsertToTree(const std::vector<std::shared_ptr<Document>>& documents) {
@@ -1472,7 +1378,7 @@ void IRTree::cachedSaveNode(int node_id, std::shared_ptr<Node> node) {
     storage->storeNode(node_id, NodeSerializer::serialize(*node));
 }
 
-// 关键优化：自底向上构建树 - 避免频繁的树调整操作
+// 自底向上构建树 - 避免频繁的树调整操作
 void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& documents) {
 
     if (documents.empty()) return;
@@ -1494,19 +1400,10 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
 
         // 计算叶子节点的MBR - 包含该批次所有文档
         MBR leaf_mbr = sorted_docs[i]->getLocation();
-        char msg[256];
-        snprintf(msg, sizeof(msg), "First doc in leaf: [%.6f,%.6f] to [%.6f,%.6f]", 
-                sorted_docs[i]->getLocation().getMin()[0], sorted_docs[i]->getLocation().getMin()[1],
-                sorted_docs[i]->getLocation().getMax()[0], sorted_docs[i]->getLocation().getMax()[1]);
-        PRINT(msg);
+        
         for (size_t j = i + 1; j < end_index; j++) {
             leaf_mbr.expand(sorted_docs[j]->getLocation());
         }
-
-        snprintf(msg, sizeof(msg), "Final leaf MBR: [%.6f,%.6f] to [%.6f,%.6f]", 
-                leaf_mbr.getMin()[0], leaf_mbr.getMin()[1],
-                leaf_mbr.getMax()[0], leaf_mbr.getMax()[1]);
-        PRINT(msg);
 
         // 创建叶子节点
         int leaf_id = createNewNode(Node::LEAF, 0, leaf_mbr);
@@ -1545,6 +1442,12 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
             [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
                 return a->getMBR().getCenter()[0] < b->getMBR().getCenter()[0];
             });
+        
+ 
+    // 显示当前层所有节点的MBR
+    for (size_t idx = 0; idx < current_level.size(); idx++) {
+        MBR node_mbr = current_level[idx]->getMBR();
+    }    
 
         // 创建父节点
         for (size_t i = 0; i < current_level.size(); i += max_capacity) {
@@ -1552,6 +1455,7 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
 
             // 计算父节点的MBR - 包含所有子节点
             MBR parent_mbr = current_level[i]->getMBR();
+
             for (size_t j = i + 1; j < end_index; j++) {
                 parent_mbr.expand(current_level[j]->getMBR());
             }

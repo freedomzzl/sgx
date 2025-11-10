@@ -27,7 +27,7 @@ void testWithQueryFileSGX(const std::string& query_filename, bool show_details =
 
     // 批量插入数据
     std::cout << "Loading data into SGX IRTree..." << std::endl;
-    if (!enclave.bulkInsertFromFile("small_data.txt")) {
+    if (!enclave.bulkInsertFromFile("medium_data.txt")) {
         std::cerr << "Failed to bulk insert data" << std::endl;
         return;
     }

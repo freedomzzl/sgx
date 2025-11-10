@@ -36,11 +36,6 @@ public:
     void clear();
     void merge(const InvertedIndex& other);
 
-    // 返回字符串长度，通过buffer输出
-    int toString(Vocabulary& vocab, char* buffer, size_t buffer_size) const;
-    
-    // 获取字符串表示的长度（用于分配缓冲区）
-    size_t getStringLength(Vocabulary& vocab) const;
 };
 
 #endif

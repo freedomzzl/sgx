@@ -1,8 +1,8 @@
+
 #include "Node.h"
 #include "Document.h"
+#include <sstream>
 #include <algorithm>
-#include <cstdio>
-#include <cstring>
 
 Node::Node(int id, Type node_type, int node_level, const MBR& node_mbr)
     : node_id(id), type(node_type), mbr(node_mbr), level(node_level), document_count(0) {
@@ -10,8 +10,7 @@ Node::Node(int id, Type node_type, int node_level, const MBR& node_mbr)
 
 void Node::addChild(std::shared_ptr<Node> child) {
     if (type != INTERNAL) {
-        // 静默处理，不抛出异常
-        return;
+        throw std::logic_error("Cannot add child to leaf node");
     }
 
     child_nodes.push_back(child);
@@ -31,8 +30,7 @@ void Node::addChild(std::shared_ptr<Node> child) {
 
 void Node::addDocument(std::shared_ptr<Document> doc) {
     if (type != LEAF) {
-        // 静默处理，不抛出异常
-        return;
+        throw std::logic_error("Cannot add document to internal node");
     }
 
     documents.push_back(doc);
@@ -91,87 +89,4 @@ int Node::getDocumentFrequency(const std::string& term) const {
 int Node::getMaxTermFrequency(const std::string& term) const {
     auto it = tf_max.find(term);
     return (it != tf_max.end()) ? it->second : 0;
-}
-
-size_t Node::getStringLength() const {
-    // 估算字符串长度
-    size_t length = 100; // 基础长度
-    
-    // MBR 字符串长度
-    length += mbr.getStringLength();
-    
-    // DF 术语的长度
-    int count = 0;
-    for (const auto& pair : df) {
-        if (count++ >= 5) break;
-        length += pair.first.length() + 10; // 术语名 + 频率 + 分隔符
-    }
-    
-    return length;
-}
-
-int Node::toString(char* buffer, size_t buffer_size) const {
-    if (!buffer || buffer_size == 0) {
-        return -1;
-    }
-    
-    int written = 0;
-    
-    // 写入基础信息
-    written += snprintf(buffer + written, buffer_size - written, 
-                       "Node[id=%d, type=%s, level=%d, documents=%d, ",
-                       node_id, 
-                       (type == LEAF ? "LEAF" : "INTERNAL"),
-                       level, 
-                       document_count);
-    if (written >= buffer_size) return written;
-    
-    // 写入 MBR 信息
-    size_t mbr_buffer_size = buffer_size - written;
-    if (mbr_buffer_size > 0) {
-        int mbr_written = mbr.toString(buffer + written, mbr_buffer_size);
-        if (mbr_written > 0) {
-            written += mbr_written;
-        }
-    }
-    
-    if (written >= buffer_size) return written;
-    
-    // 写入结束括号
-    written += snprintf(buffer + written, buffer_size - written, "]");
-    if (written >= buffer_size) return written;
-    
-    // 显示前5个最常见的术语
-    written += snprintf(buffer + written, buffer_size - written, " {df=");
-    if (written >= buffer_size) return written;
-    
-    int count = 0;
-    for (const auto& pair : df) {
-        if (count++ >= 5) break;
-        
-        if (count > 1) {
-            written += snprintf(buffer + written, buffer_size - written, ", ");
-            if (written >= buffer_size) return written;
-        }
-        
-        written += snprintf(buffer + written, buffer_size - written, 
-                           "%s:%d", pair.first.c_str(), pair.second);
-        if (written >= buffer_size) return written;
-    }
-    
-    if (df.size() > 5) {
-        written += snprintf(buffer + written, buffer_size - written, ", ...");
-        if (written >= buffer_size) return written;
-    }
-    
-    written += snprintf(buffer + written, buffer_size - written, "}");
-    
-    // 确保字符串以null结尾
-    if (written < buffer_size) {
-        buffer[written] = '\0';
-    } else {
-        buffer[buffer_size - 1] = '\0';
-    }
-    
-    return written;
 }

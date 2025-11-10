@@ -29,11 +29,6 @@ public:
     // 清空词汇表
     void clear();
 
-    // 使用缓冲区输出字符串
-    int toString(char* buffer, size_t buffer_size) const;
-    
-    // 获取字符串表示的长度
-    size_t getStringLength() const;
 };
 
 #endif

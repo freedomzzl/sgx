@@ -38,12 +38,6 @@ public:
     void setId(int id) { doc_id = id; }
     const std::unordered_map<int, double>& getTermWeights() const { return term_weights; }
     size_t size() const { return term_weights.size(); }
-
-    // 使用缓冲区输出字符串
-    int toString(const Vocabulary& vocab, char* buffer, size_t buffer_size) const;
-    
-    // 获取字符串表示的长度
-    size_t getStringLength(const Vocabulary& vocab) const;
 };
 
 #endif

@@ -118,18 +118,6 @@ public:
      */
     const std::unordered_map<std::string, int>& getTFMax() const { return tf_max; }
 
-    /* ======================== 调试与输出 ======================== */
-
-    /**
-     * @brief 将节点信息转换为字符串（用于调试打印）。
-     */
-    int toString(char* buffer, size_t buffer_size) const;
-    
-    /**
-     * @brief 获取字符串表示的长度
-     */
-    size_t getStringLength() const;
-
     /* ======================== 辅助接口 ======================== */
 
     /**
@@ -154,11 +142,11 @@ public:
     /**
      * @brief 设置内部节点的子节点列表（用于反序列化）。
      * @param children 子节点向量
+     * @throws std::logic_error 若当前节点是叶子节点则抛出异常
      */
     void setChildNodes(const std::vector<std::shared_ptr<Node>>& children) {
         if (type != INTERNAL) {
-            // 静默处理，不抛出异常
-            return;
+            throw std::logic_error("Cannot set child nodes on leaf node");
         }
         child_nodes = children;
         updateSummary();

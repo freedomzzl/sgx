@@ -2,7 +2,7 @@
 #define MBR_H
 
 #include <vector>
-#include <string>
+#include<string>
 #include <cmath>
 
 class MBR {
@@ -34,12 +34,6 @@ public:
     // Getter/Setter
     const std::vector<double>& getMin() const { return min_coords; }
     const std::vector<double>& getMax() const { return max_coords; }
-
-    // 使用缓冲区输出字符串
-    int toString(char* buffer, size_t buffer_size) const;
-    
-    //获取字符串表示的长度
-    size_t getStringLength() const;
 
     std::vector<double> getCenter() const {
         std::vector<double> center;
