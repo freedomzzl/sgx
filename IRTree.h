@@ -1,9 +1,7 @@
 #ifndef IRTREE_H
 #define IRTREE_H
 
-
 #include <memory>
-#include <mutex>
 #include <vector>
 #include <queue>
 #include <stack>
@@ -14,7 +12,9 @@
 #include "InvertedIndex.h"
 #include "Vocabulary.h"
 #include "StorageInterface.h"
+#include "SGXEnclave_t.h"
 #include"ringoram.h"
+#include <mutex>
 
 
 //
@@ -331,9 +331,6 @@ public:
     /// 批量将文档插入树结构
     void bulkInsertToTree(const std::vector<std::shared_ptr<Document>>& documents);
 
-    // 辅助函数：字符串转double
-    bool parseDouble(const std::string& str, double& result);
-
     // ====================================================
     // 存储同步与缓存管理
     // ====================================================
@@ -347,6 +344,23 @@ public:
     /// 将节点保存并更新缓存
     void cachedSaveNode(int node_id, std::shared_ptr<Node> node);
 
+    /// 清空缓存
+    void clearCache() {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        node_cache.clear();
+        char msg1[256];
+        snprintf(msg1, sizeof(msg1), "IRTree cache cleared - %zu nodes removed", node_cache.size());
+        ocall_print_string(msg1);
+    }
+
+    /// 打印缓存状态
+    void printCacheStats() const {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        char msg2[256];
+        snprintf(msg2, sizeof(msg2), "IRTree cache stats - Size: %zu", node_cache.size());
+        ocall_print_string(msg2);
+    }
+
     // ====================================================
     // 树结构优化
     // ====================================================
@@ -357,7 +371,6 @@ public:
     void computeAndSetChildUpperBounds(std::shared_ptr<Node> parent);
 
     int search_blocks;
-    
 };
 
 #endif // IRTREE_H

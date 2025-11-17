@@ -42,7 +42,7 @@ sgx_status_t ecall_irtree_initialize(int dims, int min_cap, int max_cap) {
         
         // 简化存储创建
         ocall_print_string("Creating RingOramStorage...");
-        auto storage = std::make_shared<RingOramStorage>(1000, 4096); // 使用较小的参数
+        auto storage = std::make_shared<RingOramStorage>(totalnumRealblock, blocksize); // 使用较小的参数
         
         ocall_print_string("Creating IRTree instance...");
         g_irtree = std::make_unique<IRTree>(storage, dims, min_cap, max_cap);
@@ -382,9 +382,7 @@ sgx_status_t ecall_oram_access(int operation_type, int block_index,
                            reinterpret_cast<const char*>(data) + data_size);
             snprintf(msg, sizeof(msg), "Data vector created, size=%zu", data_vec.size());
             ocall_print_string(msg);
-        } else {
-            ocall_print_string("No data provided");
-        }
+        } 
         
         // 执行 ORAM 访问
         std::vector<char> result_vec = g_oram->access(block_index, op, data_vec);

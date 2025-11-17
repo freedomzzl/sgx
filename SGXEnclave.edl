@@ -65,5 +65,16 @@ enclave {
         int position,  
         [in, size=65536] const uint8_t* data
     );
-};
+
+    sgx_status_t ocall_read_path(
+    int leafid,
+    int blockindex,
+    [out] int* is_dummy,         
+    [out, size=4096] uint8_t* result_data,
+    [out] size_t* actual_size
+    );
+
+    void ocall_start_measurement([in, string] const char* operation_name);
+    void ocall_end_measurement([in, string] const char* operation_name);
+    };
 };

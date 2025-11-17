@@ -1,5 +1,5 @@
 #include "block.h"
-#include <cstring>  // 用于memcpy
+#include <cstring>  
 
 block::block()
     :leaf_id(-1), blockindex(-1), data()

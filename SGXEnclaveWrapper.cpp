@@ -16,6 +16,9 @@ using namespace std;
 // 全局外部存储实例
 static std::unique_ptr<ServerStorage> g_external_storage;
 
+// 静态变量用于时间测量
+static std::chrono::high_resolution_clock::time_point g_measurement_start;
+
 // OCALL实现 - 在飞地外执行
 extern "C" void ocall_print_string(const char* str) {
     std::cout << "[ENCLAVE OCALL]: " << str << std::endl;
@@ -289,22 +292,93 @@ extern "C" sgx_status_t ocall_write_bucket(int position, const uint8_t* data) {
                
             }
         }
-        
-        // // 写入前检查该位置当前状态
-        // std::cout << "Before write - ";
-        // checkServerStorageState(position, "BEFORE_WRITE");
-        
+ 
         // 执行写入
         g_external_storage->SetBucket(position, bkt_to_write);
-        
-        // // 写入后立即验证
-        // std::cout << "After write - ";
-        // checkServerStorageState(position, "AFTER_WRITE");
-        
+  
         return SGX_SUCCESS;
         
     } catch (const std::exception& e) {
         std::cerr << "Exception in ocall_write_bucket: " << e.what() << std::endl;
+        return SGX_ERROR_UNEXPECTED;
+    }
+}
+
+
+extern "C" sgx_status_t ocall_read_path(
+    int leafid,
+    int blockindex,
+    int* is_dummy,
+    uint8_t* result_data,
+    size_t* actual_size) {
+    
+    try {
+        if (!g_external_storage) {
+            std::cerr << "ERROR: External storage not initialized" << std::endl;
+            return SGX_ERROR_UNEXPECTED;
+        }
+        
+        int L = OramL;
+        int capacity = g_external_storage->GetCapacity();
+  
+        block interestblock = dummyBlock;
+        
+        // 遍历路径上的所有层级
+        for (int i = 0; i <= L; i++) {
+            int position = (1 << i) - 1 + (leafid >> (L - i));
+   
+            if (position < 0 || position >= capacity) {
+                std::cerr << "ERROR: Invalid bucket position: " << position 
+                    << " (leafid=" << leafid << ", level=" << i 
+                    << ", capacity=" << capacity << ")" 
+                    << std::endl;
+                position = 0;
+            }
+            
+            bucket& bkt = g_external_storage->GetBucket(position);
+            
+            // 查找目标块
+            int offset = -1;
+            for (int j = 0; j < (realBlockEachbkt + dummyBlockEachbkt); j++) {
+                if (bkt.ptrs[j] == blockindex && bkt.valids[j] == 1) {
+                    offset = j;
+                    break;
+                }
+            }
+            
+            if (offset == -1) {
+                offset = bkt.GetDummyblockOffset();
+            } 
+            
+            block blk = bkt.blocks[offset];
+            
+            // 标记为无效
+            bkt.valids[offset] = 0;
+            bkt.count += 1;
+            
+            if (blk.GetBlockindex() == blockindex) {
+                interestblock = blk;
+                break;
+            }
+        }
+        
+        // 判断是否是dummy块
+        *is_dummy = (interestblock.GetBlockindex() == -1) ? 1 : 0;
+
+        const auto& data = interestblock.GetData();
+        if (!data.empty() && result_data) {
+            if (data.size() > 4096) {
+                std::cerr << "ERROR: Block data size " << data.size() 
+                  << " exceeds maximum blocksize" << std::endl;
+                return SGX_ERROR_INVALID_PARAMETER;
+            }
+            memcpy(result_data, data.data(), data.size());
+            *actual_size = data.size(); 
+        } 
+        return SGX_SUCCESS;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Exception in ocall_read_path: " << e.what() << std::endl;
         return SGX_ERROR_UNEXPECTED;
     }
 }
@@ -367,6 +441,21 @@ extern "C" sgx_status_t ocall_get_file_size(const char* filename, size_t* file_s
         std::cerr << "File size check exception: " << e.what() << std::endl;
         return SGX_ERROR_UNEXPECTED;
     }
+}
+
+
+extern "C" void ocall_start_measurement(const char* operation_name) {
+    g_measurement_start = std::chrono::high_resolution_clock::now();
+    
+    std::cout << "============= " << operation_name  <<  "start ====================" << std::endl;
+}
+
+extern "C" void ocall_end_measurement(const char* operation_name) {
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - g_measurement_start);
+    
+    std::cout << operation_name << " Time: " << (duration.count() / 1000.0) << " ms" << std::endl;
+    std::cout << "============= " << operation_name  <<  "end ======================" << std::endl;
 }
 
 // ================================

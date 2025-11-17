@@ -95,14 +95,18 @@ $(SHARED_SRC_CPP:.cpp=.host.o): %.host.o: %.cpp $(HEADERS) SGXEnclave_u.h
 SGXEnclave.so: $(ENCLAVE_OBJS)
 	@echo "Linking enclave..."
 	@$(CXX) -o $@ $^ \
-		-Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles \
+		-nostdlib -nodefaultlibs -nostartfiles \
+		-Wl,--no-undefined \
 		-Wl,--whole-archive -lsgx_trts -Wl,--no-whole-archive \
-		-Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -Wl,--end-group \
+		-Wl,--start-group \
+			-lsgx_tstdc -lsgx_tcxx -lsgx_tcrypto -lsgx_tservice -lstdc++ \
+		-Wl,--end-group \
 		-L$(SGX_SDK)/lib64 \
 		-Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined \
 		-Wl,-pie,-eenclave_entry -Wl,--export-dynamic \
 		-Wl,--defsym,__ImageBase=0
 	@echo "Built enclave: SGXEnclave.so"
+
 
 # ======================================
 # 签名 Enclave

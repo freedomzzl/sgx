@@ -1,5 +1,6 @@
 #include"IRTree.h"
 #include "NodeSerializer.h"  
+#include <sstream>
 #include <queue>
 #include <stack>
 #include <algorithm>
@@ -8,99 +9,9 @@
 #include "RingoramStorage.h"
 #include "SGXEnclave_t.h"
 #include <sgx_trts.h>
-#include <sgx_thread.h>
 
 #define PRINT(msg) ocall_print_string(msg)
 
-// SGX安全的随机数生成
-class SGXRandom {
-public:
-    static int getRandom(int min, int max) {
-        uint32_t random_val;
-        sgx_read_rand((unsigned char*)&random_val, sizeof(random_val));
-        return min + (random_val % (max - min + 1));
-    }
-};
-
-// SGX互斥锁包装
-class SGXMutex {
-private:
-    sgx_thread_mutex_t mutex;
-public:
-    SGXMutex() {
-        sgx_thread_mutex_init(&mutex, NULL);
-    }
-    ~SGXMutex() {
-        sgx_thread_mutex_destroy(&mutex);
-    }
-    void lock() {
-        sgx_thread_mutex_lock(&mutex);
-    }
-    void unlock() {
-        sgx_thread_mutex_unlock(&mutex);
-    }
-};
-
-// 文件操作类
-class SGXFile {
-public:
-    static bool readFile(const std::string& filename, std::vector<uint8_t>& content) {
-        size_t file_size;
-        sgx_status_t retval;
-        
-        // 调用 OCALL 获取文件大小
-        if (ocall_get_file_size(&retval, filename.c_str(), &file_size) != SGX_SUCCESS || retval != SGX_SUCCESS) {
-            return false;
-        }
-        
-        if (file_size == 0) {
-            return false;
-        }
-        
-        content.resize(file_size);
-        size_t actual_size;
-        
-        // 调用 OCALL 读取文件内容
-        if (ocall_read_file(&retval, filename.c_str(), content.data(), file_size, &actual_size) != SGX_SUCCESS || retval != SGX_SUCCESS) {
-            return false;
-        }
-        
-        return actual_size == file_size;
-    }
-    
-    static std::vector<std::string> readLines(const std::string& filename) {
-        std::vector<uint8_t> file_content;
-        if (!readFile(filename, file_content)) {
-            return {};
-        }
-        
-        std::vector<std::string> lines;
-        std::string current_line;
-        
-        for (size_t i = 0; i < file_content.size(); i++) {
-            char c = static_cast<char>(file_content[i]);
-            if (c == '\n') {
-                if (!current_line.empty()) {
-                    lines.push_back(current_line);
-                    current_line.clear();
-                }
-            } else {
-                current_line += c;
-            }
-        }
-        
-        if (!current_line.empty()) {
-            lines.push_back(current_line);
-        }
-        
-        return lines;
-    }
-};
-
-
-
-// 全局互斥锁实例
-static SGXMutex g_cache_mutex;
 
 
 // 构造函数
@@ -119,12 +30,14 @@ IRTree::IRTree(std::shared_ptr<StorageInterface> storage_impl,
     initializeRecursivePositionMap();
 }
 
-// 节点管理方法
+//节点管理方法
 std::shared_ptr<Node> IRTree::loadNode(int node_id) const {
     // 从存储中读取节点数据
     auto node_data = storage->readNode(node_id);
     if (node_data.empty()) {
-        PRINT("No data found for node");
+        char msg1[256];
+        snprintf(msg1, sizeof(msg1), "No data found for node %d", node_id);
+        PRINT(msg1);
 
         return nullptr;
     }
@@ -132,7 +45,9 @@ std::shared_ptr<Node> IRTree::loadNode(int node_id) const {
     // 反序列化节点数据为节点对象
     auto node = NodeSerializer::deserialize(node_data);
     if (!node) {
-        PRINT("Failed to deserialize node");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to deserialize node %d",node_id);
+        PRINT(msg);
     }
 
     return node;
@@ -140,14 +55,18 @@ std::shared_ptr<Node> IRTree::loadNode(int node_id) const {
 
 void IRTree::saveNode(int node_id, std::shared_ptr<Node> node) {
     if (!node) {
-        PRINT("Cannot save null node");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Cannot save null node with ID %d",node_id);
+        PRINT(msg);
         return;
     }
 
     // 序列化节点对象为字节数据
     auto node_data = NodeSerializer::serialize(*node);
     if (node_data.empty()) {
-        PRINT("Failed to serialize node");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to serialize node %d",node_id);
+        PRINT(msg);
         return;
     }
 
@@ -162,7 +81,9 @@ int IRTree::createNewNode(Node::Type type, int level, const MBR& mbr) {
 
     // 验证参数合理性
     if (type == Node::LEAF && level != 0) {
-        PRINT("WARNING: Creating leaf node with non-zero level");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"WARNING: Creating leaf node with level %d (should be 0)",level);
+        PRINT(msg);
     }
     if (type == Node::INTERNAL && level == 0) {
         PRINT("WARNING: Creating internal node with level 0");
@@ -233,7 +154,6 @@ void IRTree::processLeafNode(std::shared_ptr<Node> leaf_node,
     std::vector<TreeHeapEntry>& results) const {
 
     if (!leaf_node || leaf_node->getType() != Node::LEAF) {
-
         return;
     }
 
@@ -259,6 +179,8 @@ void IRTree::processLeafNode(std::shared_ptr<Node> leaf_node,
                 break;
             }
         }
+
+
         // 如果满足空间和文本条件，计算综合相关性并加入结果
         if (has_all_keywords) {
             double spatial_rel = computeSpatialRelevance(doc->getLocation(), spatial_scope);
@@ -328,7 +250,6 @@ void IRTree::processInternalNode(std::shared_ptr<Node> internal_node,
     }
 }
 
-
 // 使用路径处理内部节点
 void IRTree::processInternalNodeWithPath(std::shared_ptr<Node> internal_node,
     int parent_path,
@@ -381,10 +302,9 @@ void IRTree::processInternalNodeWithPath(std::shared_ptr<Node> internal_node,
         // 4. 只有通过所有检查的节点才实际加载
         auto child_node = accessNodeByPath(child_path);
         if (!child_node) {
-            std::string msg = "Failed to load child node " + std::to_string(child_id) +
-                  " using path " + std::to_string(child_path);
-            ocall_print_string(msg.c_str());
-
+            char msg[256];
+            snprintf(msg,sizeof(msg),"Failed to load child node %d using path %d",child_id,child_path);
+            PRINT(msg);
             continue;
         }
 
@@ -462,8 +382,9 @@ int IRTree::chooseLeaf(const MBR& mbr) {
     auto current = loadNode(current_id);
 
     if (!current) {
-        std::string msg = "Failed to load root node " + std::to_string(current_id);
-        ocall_print_string(msg.c_str());
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to load root node %d",current_id);
+        PRINT(msg);
         return -1;
     }
 
@@ -506,7 +427,9 @@ void IRTree::adjustTree(int node_id)
     // 首先加载节点
     auto node = loadNode(node_id);
     if (!node) {
-        PRINT("ajust_tree:Failed to load node");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to load node %d for adjustment",node_id);
+        PRINT(msg);
         return;
     }
 
@@ -529,7 +452,9 @@ void IRTree::splitNode(int node_id) {
 
     auto node = loadNode(node_id);
     if (node == nullptr) {
-        PRINT("splitNode:Failed to load node");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to load node %d for splitting",node_id);
+        PRINT(msg);
         return;
     }
 
@@ -538,7 +463,7 @@ void IRTree::splitNode(int node_id) {
 
 
         if (documents.size() <= max_capacity) {
-            PRINT("No need to split - within capacity");
+            PRINT("  No need to split - within capacity");
             return;
         }
 
@@ -577,7 +502,7 @@ void IRTree::splitNode(int node_id) {
         auto new_node2 = loadNode(new_node_id2);
 
         if (new_node1 == nullptr || new_node2 == nullptr) {
-            PRINT("splitNode:Failed to create new nodes for splitting");
+            PRINT("? Failed to create new nodes for splitting");
             return;
         }
 
@@ -644,8 +569,6 @@ void IRTree::splitNode(int node_id) {
             return;
         }
 
-
-
         // 按X坐标排序子节点
         std::sort(children.begin(), children.end(),
             [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
@@ -654,7 +577,7 @@ void IRTree::splitNode(int node_id) {
 
         int split_index = children.size() / 2;
 
-        // 创建新节点 - 修复MBR计算
+        // 创建新节点
         MBR new_mbr1 = children[0]->getMBR();
         MBR new_mbr2 = children[split_index]->getMBR();
 
@@ -672,7 +595,7 @@ void IRTree::splitNode(int node_id) {
         auto new_node2 = loadNode(new_node_id2);
 
         if (new_node1 == nullptr || new_node2 == nullptr) {
-            PRINT("Failed to create new internal nodes for splitting");
+            PRINT(" Failed to create new internal nodes for splitting");
             return;
         }
 
@@ -717,7 +640,6 @@ void IRTree::splitNode(int node_id) {
     }
 
 }
-
 // 初始化递归位置映射
 void IRTree::initializeRecursivePositionMap() {
     // 从根节点开始递归分配路径
@@ -737,8 +659,9 @@ void IRTree::initializeRecursivePositionMap() {
 int IRTree::assignPathRecursively(int node_id) {
     auto node = loadNode(node_id);
     if (!node) {
-        std::string msg = "Failed to load node " + std::to_string(node_id) + " for path assignment";
-        ocall_print_string(msg.c_str());
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to load node %d for path assignment",node_id);
+        PRINT(msg);
         return -1;
     }
 
@@ -774,7 +697,16 @@ int IRTree::assignPathRecursively(int node_id) {
 
 // 获取随机叶子路径
 int IRTree::getRandomLeafPath() const {
-    return SGXRandom::getRandom(0, numLeaves - 1);
+ 
+    uint32_t random_value;
+    sgx_status_t ret = sgx_read_rand((uint8_t*)&random_value, sizeof(random_value));
+    
+    if (ret != SGX_SUCCESS) {
+        ocall_print_string("Warning: sgx_read_rand failed, using fallback");
+        
+    }
+    
+    return (int)(random_value % numLeaves);
 }
 
 // 根节点路径管理
@@ -805,6 +737,7 @@ void IRTree::setRootPath(int path) {
     auto path_oram_storage = std::dynamic_pointer_cast<RingOramStorage>(storage);
     if (path_oram_storage) {
         path_oram_storage->setRootPath(path);
+        // 移除调试打印，让 RingOramStorage 处理日志
     }
     else {
         PRINT("Storage is not RingOramStorage, cannot set root path");
@@ -814,31 +747,34 @@ void IRTree::setRootPath(int path) {
 // 递归访问节点（使用路径而不是节点ID）
 std::shared_ptr<Node> IRTree::accessNodeByPath(int path) {
     if (!storage) {
-        ocall_print_string("Storage not available for path access");
+        PRINT("Storage not available for path access");
         return nullptr;
     }
-    
-    // 动态转换到 RingOramStorage 以使用路径访问
+
+    // 动态转换到RingOramStorage来使用路径访问
     auto path_oram_storage = std::dynamic_pointer_cast<RingOramStorage>(storage);
     if (path_oram_storage) {
         auto node_data = path_oram_storage->accessByPath(path);
         if (node_data.empty()) {
-            std::string msg = "Failed to access node data for path " + std::to_string(path);
-            ocall_print_string(msg.c_str());
+            char msg[256];
+            snprintf(msg,sizeof(msg),"Failed to access node data for path %d",path);
+            PRINT(msg);
             return nullptr;
         }
 
         // 反序列化节点数据
         auto node = NodeSerializer::deserialize(node_data);
         if (!node) {
-            std::string msg = "Failed to deserialize node from path " + std::to_string(path);
-            ocall_print_string(msg.c_str());
+            char msg[256];
+            snprintf(msg,sizeof(msg),"Failed to deserialize node from path %d",path);
+            PRINT(msg);
             return nullptr;
         }
 
         return node;
-    } else {
-        ocall_print_string("Storage is not RingOramStorage, cannot use path-based access");
+    }
+    else {
+        PRINT("Storage is not RingOramStorage, cannot use path-based access");
         return nullptr;
     }
 }
@@ -866,7 +802,9 @@ void IRTree::insertDocument(std::shared_ptr<Document> document) {
 
     auto leaf_node = loadNode(leaf_id);
     if (!leaf_node) {
-        PRINT("Failed to load leaf node");
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to load leaf node %d",leaf_id);
+        PRINT(msg);
         return;
     }
 
@@ -919,8 +857,9 @@ std::vector<TreeHeapEntry> IRTree::search(const std::vector<std::string>& keywor
     // 加载根节点（使用路径访问）
     auto root_node = accessNodeByPath(root_path);
     if (!root_node) {
-        std::string msg = "Failed to load root node using path " + std::to_string(root_path);
-        ocall_print_string(msg.c_str());
+        char msg[256];
+        snprintf(msg,sizeof(msg),"Failed to load root node using path %d",root_path);
+        PRINT(msg);
         return results;
     }
 
@@ -973,7 +912,7 @@ std::vector<TreeHeapEntry> IRTree::search(const std::vector<std::string>& keywor
     if (results.size() > k) {
         results.resize(k);
     }
-
+    
     PRINT("=== SEARCH COMPLETED ===");
     char msg[256];
     snprintf(msg, sizeof(msg), "  Nodes visited: %zu", nodes_visited);
@@ -1004,51 +943,72 @@ std::vector<TreeHeapEntry> IRTree::search(const std::vector<std::string>& keywor
     PRINT(msg);
     }
 
+
     return results;
 }
 
 void IRTree::bulkInsertFromFile(const std::string& filename) {
-    PRINT("Reading file for bulk insertion...");
-    
-    auto lines = SGXFile::readLines(filename);
-    if (lines.empty()) {
-        PRINT("Failed to read file or file is empty");
+    std::vector<std::tuple<std::string, double, double>> documents;
+
+    // 获取文件大小
+    size_t file_size = 0;
+    sgx_status_t retval;
+    sgx_status_t status = ocall_get_file_size(&retval, filename.c_str(), &file_size);
+    if (status != SGX_SUCCESS || retval != SGX_SUCCESS || file_size == 0) {
+        ocall_print_string("Error: Cannot get file size");
         return;
     }
-    
-    std::vector<std::tuple<std::string, double, double>> documents;
-    
-    for (const auto& line : lines) {
-        if (line.empty()) continue;
-        
-        // 解析格式: 文本|经度|纬度
-        size_t pos1 = line.find('|');
-        if (pos1 == std::string::npos) continue;
-        
-        size_t pos2 = line.find('|', pos1 + 1);
-        if (pos2 == std::string::npos) continue;
-        
-        std::string text = line.substr(0, pos1);
-        std::string lon_str = line.substr(pos1 + 1, pos2 - pos1 - 1);
-        std::string lat_str = line.substr(pos2 + 1);
-        
-        // 简单的字符串转double
-        double lon = 0.0, lat = 0.0;
-        if (parseDouble(lon_str, lon) && parseDouble(lat_str, lat)) {
-            documents.emplace_back(text, lon, lat);
-        }
+
+    // 分配内存并读取文件
+    std::vector<char> file_buffer(file_size + 1, '\0');
+    size_t actual_size = 0;
+
+    status = ocall_read_file(&retval, filename.c_str(),
+                            reinterpret_cast<uint8_t*>(file_buffer.data()),
+                            file_size, &actual_size);
+    if (status != SGX_SUCCESS || retval != SGX_SUCCESS || actual_size == 0) {
+        ocall_print_string("Error: Cannot read file");
+        return;
     }
-    
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Loaded %zu documents from file", documents.size());
-    PRINT(msg);
-    
-    bulkInsertDocuments(documents);
+
+    // 用C风格字符串按行分割
+    char* saveptr1;
+    char* line = strtok_r(file_buffer.data(), "\n", &saveptr1);
+    int loaded_count = 0;
+
+    while (line != nullptr) {
+        if (line[0] == '\0') {
+            line = strtok_r(nullptr, "\n", &saveptr1);
+            continue;
+        }
+
+        // 解析格式: text|lon|lat
+        char* saveptr2;
+        char* text = strtok_r(line, "|", &saveptr2);
+        char* lon_str = strtok_r(nullptr, "|", &saveptr2);
+        char* lat_str = strtok_r(nullptr, "|", &saveptr2);
+
+        if (text && lon_str && lat_str) {
+            double lon = std::strtod(lon_str, nullptr);
+            double lat = std::strtod(lat_str, nullptr);
+            documents.emplace_back(std::string(text), lon, lat);
+            loaded_count++;
+        }
+
+        line = strtok_r(nullptr, "\n", &saveptr1);
+    }
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Successfully parsed %d documents", loaded_count);
+    ocall_print_string(msg);
+
+    if (!documents.empty()) {
+        bulkInsertDocuments(documents);
+    }
 }
 
 
 void IRTree::bulkInsertDocuments(const std::vector<std::tuple<std::string, double, double>>& documents) {
-    
     int inserted_count = 0;
 
     // 逐个插入文档（顺序插入，性能较低）
@@ -1066,58 +1026,87 @@ void IRTree::bulkInsertDocuments(const std::vector<std::tuple<std::string, doubl
         inserted_count++;
 
     }
-
 }
 
-// 优化的批量插入方法
 void IRTree::optimizedBulkInsertFromFile(const std::string& filename) {
-    
-    auto lines = SGXFile::readLines(filename);
-    if (lines.empty()) {
-        PRINT("Failed to read file or file is empty");
+    std::vector<std::tuple<std::string, double, double>> documents;
+    int loaded_count = 0;
+    const int REPORT_INTERVAL = 1000;
+
+    // 获取文件大小
+    size_t file_size = 0;
+    sgx_status_t retval;
+    sgx_status_t status = ocall_get_file_size(&retval, filename.c_str(), &file_size);
+    if (status != SGX_SUCCESS || retval != SGX_SUCCESS || file_size == 0) {
+        ocall_print_string("Error: Cannot get file size");
         return;
     }
-    
-    std::vector<std::tuple<std::string, double, double>> documents;
-    documents.reserve(lines.size());
 
-    
-    for (const auto& line : lines) {
-        if (line.empty()) continue;
-        
-        // 快速解析
-        const char* str = line.c_str();
-        const char* pipe1 = strchr(str, '|');
-        if (!pipe1) continue;
-        
-        const char* pipe2 = strchr(pipe1 + 1, '|');
-        if (!pipe2) continue;
-        
-        std::string text(str, pipe1 - str);
-        std::string lon_str(pipe1 + 1, pipe2 - pipe1 - 1);
-        std::string lat_str(pipe2 + 1);
-        
-        double lon = 0.0, lat = 0.0;
-        if (parseDouble(lon_str, lon) && parseDouble(lat_str, lat)) {
-            documents.emplace_back(text, lon, lat);
-        }
+    // 读取文件内容
+    std::vector<char> file_buffer(file_size + 1, '\0');
+    size_t actual_size = 0;
+
+    status = ocall_read_file(&retval, filename.c_str(),
+                            reinterpret_cast<uint8_t*>(file_buffer.data()),
+                            file_size, &actual_size);
+    if (status != SGX_SUCCESS || retval != SGX_SUCCESS || actual_size == 0) {
+        ocall_print_string("Error: Cannot read file");
+        return;
     }
-  
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Optimized file loading: %zu records", 
-             documents.size());
-    PRINT(msg);
-    
-    optimizedBulkInsertDocuments(documents);
+
+    // 用C字符串解析
+    char* saveptr1;
+    char* line = strtok_r(file_buffer.data(), "\n", &saveptr1);
+
+    while (line != nullptr) {
+        if (line[0] == '\0') {
+            line = strtok_r(nullptr, "\n", &saveptr1);
+            continue;
+        }
+
+        char* saveptr2;
+        char* text = strtok_r(line, "|", &saveptr2);
+        char* lon_str = strtok_r(nullptr, "|", &saveptr2);
+        char* lat_str = strtok_r(nullptr, "|", &saveptr2);
+
+        if (text && lon_str && lat_str) {
+            double lon = std::strtod(lon_str, nullptr);
+            double lat = std::strtod(lat_str, nullptr);
+            documents.emplace_back(std::string(text), lon, lat);
+            loaded_count++;
+
+            if (loaded_count % REPORT_INTERVAL == 0) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Loaded %d records...", loaded_count);
+                ocall_print_string(msg);
+            }
+        }
+
+        line = strtok_r(nullptr, "\n", &saveptr1);
+    }
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "File loading completed: %d records", loaded_count);
+    ocall_print_string(msg);
+
+    if (!documents.empty()) {
+        optimizedBulkInsertDocuments(documents);
+    }
 }
+
 
 
 void IRTree::optimizedBulkInsertDocuments(const std::vector<std::tuple<std::string, double, double>>& documents) {
     if (documents.empty()) return;
 
+    char msg[256];
+    snprintf(msg,sizeof(msg),"Starting bulk insertion of %zu documents...",documents.size());
+    PRINT(msg);
+
     // 阶段1：批量创建文档对象（并行化）
     std::vector<std::shared_ptr<Document>> doc_objects;
     doc_objects.reserve(documents.size());
+
 
     // 使用更高效的方式创建文档 - OpenMP并行化
 #pragma omp parallel for
@@ -1144,84 +1133,42 @@ void IRTree::optimizedBulkInsertDocuments(const std::vector<std::tuple<std::stri
     // 阶段3：使用自底向上的方式构建树（关键优化）
     buildTreeBottomUp(doc_objects);
 
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Bulk insertion completed: %zu documents.", documents.size());
+    snprintf(msg,sizeof(msg),"bulk insertion completed: %zu documents",documents.size());
     PRINT(msg);
 }
 
 void IRTree::bulkBuildGlobalIndex(const std::vector<std::shared_ptr<Document>>& documents) {
-   
+ 
     // 批量词汇表构建 - 先收集所有词汇
     std::unordered_map<std::string, int> term_frequencies;
 
     // 先收集所有词汇及其频率
     for (const auto& doc : documents) {
-        const std::string& text = doc->getText();
-        const char* str = text.c_str();
-        const char* start = str;
-        
-        while (*str) {
-            if (*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r') {
-                if (str > start) {
-                    std::string word(start, str - start);
-                    term_frequencies[word]++;
-                }
-                start = str + 1;
-            }
-            str++;
-        }
-        
-        // 处理最后一个单词
-        if (str > start) {
-            std::string word(start, str - start);
+        std::istringstream iss(doc->getText());
+        std::string word;
+        while (iss >> word) {
             term_frequencies[word]++;
         }
     }
 
-
     // 批量添加到词汇表
     for (const auto& term : term_frequencies) {
-        int term_id = vocab.addTerm(term.first);
+        vocab.addTerm(term.first); // 这会创建或获取term id
     }
 
     // 批量构建文档向量
     for (const auto& doc : documents) {
         Vector doc_vector(doc->getId());
-        
-        // 手动分词构建向量
-        const std::string& text = doc->getText();
-        const char* str = text.c_str();
-        const char* start = str;
-        
-        while (*str) {
-            if (*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r') {
-                if (str > start) {
-                    std::string word(start, str - start);
-                    int term_id = vocab.getTermId(word);
-                    if (term_id != -1) {
-                        doc_vector.addTerm(term_id, 1.0);
-                    }
-                }
-                start = str + 1;
-            }
-            str++;
-        }
-        
-        // 处理最后一个单词
-        if (str > start) {
-            std::string word(start, str - start);
-            int term_id = vocab.getTermId(word);
-            if (term_id != -1) {
-                doc_vector.addTerm(term_id, 1.0);
-            }
-        }
-        
+        Vector::vectorize(doc_vector, doc->getText(), vocab);
         global_index.addDocument(doc->getId(), doc_vector);
     }
+
+    PRINT("Optimized global index built");
 }
 
 void IRTree::bulkInsertToTree(const std::vector<std::shared_ptr<Document>>& documents) {
- 
+
+
     // 按空间位置排序，提高局部性
     std::vector<std::shared_ptr<Document>> sorted_docs = documents;
     std::sort(sorted_docs.begin(), sorted_docs.end(),
@@ -1242,8 +1189,8 @@ void IRTree::bulkInsertToTree(const std::vector<std::shared_ptr<Document>>& docu
             choose_leaf_count++;
 
             if (choose_leaf_count % 1000 == 0) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "Processed %zu documents for leaf assignment...", choose_leaf_count);
+                char msg[256];
+                snprintf(msg,sizeof(msg),"Processed %d documents for leaf assignment...",choose_leaf_count);
                 PRINT(msg);
             }
         }
@@ -1280,89 +1227,45 @@ void IRTree::bulkInsertToTree(const std::vector<std::shared_ptr<Document>>& docu
         adjust_count++;
 
         if (adjust_count % 100 == 0) {
-            char msg[128];
-            snprintf(msg, sizeof(msg), "Adjusted %zu nodes...", adjust_count);
+            char msg[256];
+            snprintf(msg,sizeof(msg),"Adjusted %d nodes...",adjust_count);
             PRINT(msg);
         }
     }
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Tree insertion completed: %zu documents.", insert_count);
-    PRINT(msg);
-}
 
-bool IRTree::parseDouble(const std::string& str, double& result) {
-    // 简单的字符串转double实现
-    const char* s = str.c_str();
-    result = 0.0;
-    double sign = 1.0;
-    double fraction = 1.0;
-    bool has_digit = false;
-    
-    // 处理符号
-    if (*s == '-') {
-        sign = -1.0;
-        s++;
-    } else if (*s == '+') {
-        s++;
-    }
-    
-    // 整数部分
-    while (*s >= '0' && *s <= '9') {
-        result = result * 10.0 + (*s - '0');
-        has_digit = true;
-        s++;
-    }
-    
-    // 小数部分
-    if (*s == '.') {
-        s++;
-        while (*s >= '0' && *s <= '9') {
-            result = result * 10.0 + (*s - '0');
-            fraction *= 10.0;
-            has_digit = true;
-            s++;
-        }
-    }
-    
-    if (!has_digit) {
-        return false;
-    }
-    
-    result = sign * result / fraction;
-    return true;
+    char msg[256];
+    snprintf(msg,sizeof(msg),"Tree insertion completed: %d documents",insert_count);
+    PRINT(msg);
 }
 
 // 刷新缓存 - 将所有缓存节点写回存储
 void IRTree::flushNodeCache() {
-    g_cache_mutex.lock();
+    std::lock_guard<std::mutex> lock(cache_mutex);
     for (const auto& entry : node_cache) {
         storage->storeNode(entry.first, NodeSerializer::serialize(*entry.second));
     }
     node_cache.clear();
-    g_cache_mutex.unlock();
 }
 
 // 缓存优化的节点加载 - 先查缓存，没有再加载
 std::shared_ptr<Node> IRTree::cachedLoadNode(int node_id) const {
-    g_cache_mutex.lock();
+    std::lock_guard<std::mutex> lock(cache_mutex);
 
     auto it = node_cache.find(node_id);
     if (it != node_cache.end()) {
-        g_cache_mutex.unlock();
         return it->second;  // 缓存命中
     }
 
     // 缓存未命中，从存储加载
     auto node = loadNode(node_id);
     if (node) {
-        // 简单的缓存管理
+        // 简单的缓存管理：如果缓存太大，清除一些（LRU近似）
         if (node_cache.size() >= MAX_CACHE_SIZE) {
             node_cache.erase(node_cache.begin());
         }
         node_cache[node_id] = node;
     }
 
-    g_cache_mutex.unlock();
     return node;
 }
 
@@ -1370,17 +1273,16 @@ std::shared_ptr<Node> IRTree::cachedLoadNode(int node_id) const {
 void IRTree::cachedSaveNode(int node_id, std::shared_ptr<Node> node) {
     if (!node) return;
 
-    g_cache_mutex.lock();
+    std::lock_guard<std::mutex> lock(cache_mutex);
     node_cache[node_id] = node;
-    g_cache_mutex.unlock();
 
     // 异步保存到存储
     storage->storeNode(node_id, NodeSerializer::serialize(*node));
 }
 
-// 自底向上构建树 - 避免频繁的树调整操作
+// 关键优化：自底向上构建树 - 避免频繁的树调整操作
 void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& documents) {
-
+ 
     if (documents.empty()) return;
 
     // 按空间位置聚类 - 提高局部性
@@ -1400,7 +1302,6 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
 
         // 计算叶子节点的MBR - 包含该批次所有文档
         MBR leaf_mbr = sorted_docs[i]->getLocation();
-        
         for (size_t j = i + 1; j < end_index; j++) {
             leaf_mbr.expand(sorted_docs[j]->getLocation());
         }
@@ -1417,18 +1318,11 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
             cachedSaveNode(leaf_id, leaf_node);
             leaf_nodes.push_back(leaf_node);
         }
-
-
-        //// 定期报告进度
-        //if (leaf_nodes.size() % 100 == 0) {
-        //    std::cout << "Created " << leaf_nodes.size() << " leaf nodes..." << std::endl;
-        //}
     }
 
-    char msg[128];
-    snprintf(msg, sizeof(msg), "Created %zu leaf nodes total.", leaf_nodes.size());
+    char msg[256];
+    snprintf(msg,sizeof(msg),"Created %zu leaf nodes total",leaf_nodes.size());
     PRINT(msg);
-
 
     // 自底向上构建树 - 从叶子节点开始构建上层节点
     std::vector<std::shared_ptr<Node>> current_level = leaf_nodes;
@@ -1442,12 +1336,6 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
             [](const std::shared_ptr<Node>& a, const std::shared_ptr<Node>& b) {
                 return a->getMBR().getCenter()[0] < b->getMBR().getCenter()[0];
             });
-        
- 
-    // 显示当前层所有节点的MBR
-    for (size_t idx = 0; idx < current_level.size(); idx++) {
-        MBR node_mbr = current_level[idx]->getMBR();
-    }    
 
         // 创建父节点
         for (size_t i = 0; i < current_level.size(); i += max_capacity) {
@@ -1455,7 +1343,6 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
 
             // 计算父节点的MBR - 包含所有子节点
             MBR parent_mbr = current_level[i]->getMBR();
-
             for (size_t j = i + 1; j < end_index; j++) {
                 parent_mbr.expand(current_level[j]->getMBR());
             }
@@ -1490,6 +1377,7 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
 
     // 刷新所有缓存到存储
     flushNodeCache();
+
     PRINT("Bottom-up tree construction completed");
     initializeRecursivePositionMap();
 }
@@ -1530,4 +1418,3 @@ void IRTree::computeAndSetChildUpperBounds(std::shared_ptr<Node> parent) {
         parent->setChildTextUpperBound(child_id, text_upper_bound);
     }
 }
-

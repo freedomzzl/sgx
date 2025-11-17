@@ -6,6 +6,7 @@
 #include <cmath>
 #include <sgx_trts.h>
 #include <string.h>
+
   
 
 
@@ -82,46 +83,51 @@ int ringoram::GetBlockOffset(bucket bkt, int blockindex) const{
 }
 
 void ringoram::ReadBucket(int pos) {
+    
     // 直接使用 SGX 方法读取
     bucket bkt = sgx_read_bucket(pos);
     
     for (int j = 0; j < maxblockEachbkt; j++) {
-        if (bkt.ptrs[j] != -1 && bkt.valids[j] && !bkt.blocks[j].IsDummy()) {
-            block encrypted_block = bkt.blocks[j];
-            vector<char> decrypted_data = decrypt_data(encrypted_block.GetData());
-            block decrypted_block(encrypted_block.GetLeafid(), 
-                                 encrypted_block.GetBlockindex(), 
-                                 decrypted_data);
-            stash.push_back(decrypted_block);
-        }
-    }
+		// 更严格的检查：只读取真实且有效的块
+		if (bkt.ptrs[j] != -1 && bkt.valids[j] && !bkt.blocks[j].IsDummy()) {
+			// 读取时解密
+			block encrypted_block = bkt.blocks[j];
+			vector<char> decrypted_data = decrypt_data(encrypted_block.GetData());
+			block decrypted_block(encrypted_block.GetLeafid(), encrypted_block.GetBlockindex(), decrypted_data);
+			stash.push_back(decrypted_block);
+		}
+	}
 }
 
 void ringoram::WriteBucket(int position) {
     int level = GetlevelFromPos(position);
-    vector<block> blocksTobucket;
+	vector<block> blocksTobucket;
 
-    // 从stash中选择blocks
-    for (auto it = stash.begin(); it != stash.end() && blocksTobucket.size() < realBlockEachbkt; ) {
-        int target_leaf = it->GetLeafid();
-        int target_bucket_pos = Path_bucket(target_leaf, level);
-        if (target_bucket_pos == position) {
-            if (!it->IsDummy()) {
-                vector<char> plain_data = it->GetData();
-                vector<char> encrypted_data = encrypt_data(plain_data);
-                block encrypted_block(it->GetLeafid(), it->GetBlockindex(), encrypted_data);
-                blocksTobucket.push_back(encrypted_block);
-            }
-            it = stash.erase(it);
-        } else {
-            ++it;
-        }
-    }
+	// 从stash中选择可以放在这个bucket的块
+	for (auto it = stash.begin(); it != stash.end() && blocksTobucket.size() < realBlockEachbkt; ) {
+		int target_leaf = it->GetLeafid();
+		int target_bucket_pos = Path_bucket(target_leaf, level);
+		if (target_bucket_pos == position) {
+			// 对要写回当前bucket的块进行加密
+			if (!it->IsDummy()) {
+				vector<char> plain_data = it->GetData();  // 当前是明文
+				vector<char> encrypted_data = encrypt_data(plain_data);
 
-    // 填充dummy blocks
-    while (blocksTobucket.size() < realBlockEachbkt + dummyBlockEachbkt) {
-        blocksTobucket.push_back(dummyBlock);
-    }
+				// 创建加密后的block
+				block encrypted_block(it->GetLeafid(), it->GetBlockindex(), encrypted_data);
+				blocksTobucket.push_back(encrypted_block);
+			}
+			it = stash.erase(it);
+		}
+		else {
+			++it;
+		}
+	}
+
+	// 填充dummy块
+	while (blocksTobucket.size() < realBlockEachbkt + dummyBlockEachbkt) {
+		blocksTobucket.push_back(dummyBlock);
+	}
 
     // 随机排列
     for (int i = blocksTobucket.size() - 1; i > 0; --i) {
@@ -147,40 +153,64 @@ void ringoram::WriteBucket(int position) {
 
     // 直接使用 SGX 方法写入
     sgx_write_bucket(position, bktTowrite);
+    
 }
 
-block ringoram::ReadPath(int leafid, int blockindex) {
-    block interestblock = dummyBlock;
-    size_t blocks_this_read = 0;
+// block ringoram::ReadPath(int leafid, int blockindex) {
+//     block interestblock = dummyBlock;
+//     size_t blocks_this_read = 0;
     
-    for (int i = 0; i <= L; i++) {
-        int position = Path_bucket(leafid, i);
-        bucket bkt = sgx_read_bucket(position);
-        int offset = GetBlockOffset(bkt, blockindex);
+//     for (int i = 0; i <= L; i++) {
+//         int position = Path_bucket(leafid, i);
+//         bucket bkt = sgx_read_bucket(position);
+//         int offset = GetBlockOffset(bkt, blockindex);
         
-        if (!isPositionCached(position)) {
-            blocks_this_read += 1;
-        }
+//         if (!isPositionCached(position)) {
+//             blocks_this_read += 1;
+//         }
         
-        block blk = FindBlock(bkt, offset);
-        bkt.valids[offset] = 0;
-        bkt.count += 1;
+//         block blk = FindBlock(bkt, offset);
+//         bkt.valids[offset] = 0;
+//         bkt.count += 1;
         
-        // 如果是目标块，记录下来，但仍继续走完路径
-        if (blk.GetBlockindex() == blockindex) {
-            interestblock = blk;
-        }
+//         // 如果是目标块，记录下来，但仍继续走完路径
+//         if (blk.GetBlockindex() == blockindex) {
+//             interestblock = blk;
+//         }
         
-        // 标记目标块为无效
-        if (offset >= 0 && offset < maxblockEachbkt) {
-            bkt.valids[offset] = 0;
-            bkt.count += 1;
-        }
+//         // 标记目标块为无效
+//         if (offset >= 0 && offset < maxblockEachbkt) {
+//             bkt.valids[offset] = 0;
+//             bkt.count += 1;
+//         }
         
-        sgx_write_bucket(position, bkt);
+//         sgx_write_bucket(position, bkt);
+//     }
+
+//     return interestblock;
+// }
+
+block ringoram::ReadPath(int leafid, int blockindex)
+{
+    uint8_t buffer[4096] = {0};
+    int is_dummy = 0;
+    size_t actual_data_size = 0; 
+   
+    sgx_status_t ocall_ret = SGX_SUCCESS;
+    sgx_status_t ret = ocall_read_path(&ocall_ret, leafid, blockindex, &is_dummy, buffer, &actual_data_size);
+ 
+    if (ret != SGX_SUCCESS || ocall_ret != SGX_SUCCESS) {
+        ocall_print_string("ReadPath: OCALL failed");
+        return dummyBlock;
     }
 
-    return interestblock;
+
+    if (is_dummy) {
+        return dummyBlock;
+    }
+ 
+    std::vector<char> encrypted_data(buffer, buffer + actual_data_size);
+    return block(leafid, blockindex, encrypted_data);
 }
 
 void ringoram::EvictPath() {
@@ -204,11 +234,6 @@ void ringoram::EarlyReshuffle(int l) {
         if (bkt.count >= dummyBlockEachbkt) {
             ReadBucket(position);
             WriteBucket(position);
-
-            // 重置计数
-            bkt = sgx_read_bucket(position);
-            bkt.count = 0;
-            sgx_write_bucket(position, bkt);
         }
     }
 }
@@ -256,65 +281,59 @@ std::vector<char> ringoram::decrypt_data(const std::vector<char>& encrypted_data
     }
 }
 
+
 vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
 {
-    char msg[200];
+	if (blockindex < 0 || blockindex >= N) {
 
-    if (blockindex < 0 || blockindex >= N) {
-        ocall_print_string("ERROR: Invalid block index");
-        return {};
-    }
+		return {};
+	}
 
-    int oldLeaf = positionmap[blockindex];
-    positionmap[blockindex] = get_random();
+	int oldLeaf = positionmap[blockindex];
+	positionmap[blockindex] = get_random();
 
-    // 1. 读取路径获取目标块
-    block interestblock = ReadPath(oldLeaf, blockindex);
- 
-    vector<char> blockdata;
+	// 1. 读取路径获取目标块（加密状态）
+	block interestblock = ReadPath(oldLeaf, blockindex);
+	vector<char> blockdata;
 
-    // 2. 处理读取到的块
-    if (interestblock.GetBlockindex() == blockindex) {
-        if (!interestblock.IsDummy()) {
-            blockdata = decrypt_data(interestblock.GetData());
+	// 2. 处理读取到的块
+	if (interestblock.GetBlockindex() == blockindex) {
+		// 从路径读取到的目标块，需要解密
+		if (!interestblock.IsDummy()) {
+			blockdata = decrypt_data(interestblock.GetData());
+		}
+		else {
+			blockdata = interestblock.GetData();
+		}
+	}
+	else {
+		// 3. 如果不在路径中，检查stash
+		for (auto it = stash.begin(); it != stash.end(); ++it) {
+			if (it->GetBlockindex() == blockindex) {
+				blockdata = it->GetData();   // stash中已经是明文
+				stash.erase(it);
+				break;
+			}
+		}
+	}
 
-        }
-        else {
-            blockdata = interestblock.GetData();
-        }
-    }
-    else {
-        bool found_in_stash = false;
-        for (auto it = stash.begin(); it != stash.end(); ++it) {
-            if (it->GetBlockindex() == blockindex) {
-                blockdata = it->GetData();
-                stash.erase(it);
-                found_in_stash = true;
-                break;
-            }
-        }
-        if (!found_in_stash) {
-        }
-    }
+	// 4. 如果是WRITE操作，更新数据
+	if (op == WRITE) {
+		blockdata = data;
+	}
 
-    // 4. 如果是WRITE操作，更新数据
-    if (op == WRITE) {
-        blockdata = data;
-    }
+	// 明文放入stash
+	stash.emplace_back(positionmap[blockindex], blockindex, blockdata);
 
-    // 明文放入stash
-    stash.emplace_back(positionmap[blockindex], blockindex, blockdata);
+	// 5. 路径管理和驱逐
+	round = (round + 1) % EvictRound;
+	if (round == 0) EvictPath();
 
-    // 5. 路径管理和驱逐
-    round = (round + 1) % EvictRound;
-    if (round == 0) {
-        EvictPath();
-    }
+	EarlyReshuffle(oldLeaf);
 
-    EarlyReshuffle(oldLeaf);
-
-    return blockdata;
+	return blockdata;
 }
+
 
 size_t ringoram::calculate_bucket_size(const bucket& bkt) const{
     size_t size = sizeof(SerializedBucketHeader);
@@ -443,9 +462,9 @@ bucket ringoram::deserialize_bucket(const uint8_t* data, size_t size) {
 // ================================
 
 bucket ringoram::sgx_read_bucket(int position) {
+    
     const size_t BUFFER_SIZE = 65536;
     uint8_t buffer[BUFFER_SIZE];
-    memset(buffer, 0, BUFFER_SIZE);
 
     // ocall 的封装函数第一个参数是用于接收 host 实现返回值的 sgx_status_t*
     sgx_status_t ocall_ret = SGX_SUCCESS;
@@ -460,7 +479,6 @@ bucket ringoram::sgx_read_bucket(int position) {
         throw std::runtime_error("OCALL host-level failure (ocall_read_bucket)");
     }
 
-    
     return deserialize_bucket(buffer, BUFFER_SIZE);
 }
 
@@ -482,14 +500,9 @@ void ringoram::sgx_write_bucket(int position, const bucket& bkt) {
         throw std::runtime_error("Serialized bucket larger than allowed buffer ");
     }
 
-    // 准备 字节缓冲并复制序列化数据
-    std::vector<uint8_t> sbuf(BUFFER_SIZE);
-    memset(sbuf.data(), 0, BUFFER_SIZE);
-    memcpy(sbuf.data(), serialized.data(), serialized.size());
-
     // 调用 ocall（第一个参数为接收 host 返回值的指针）
     sgx_status_t ocall_ret = SGX_SUCCESS;
-    sgx_status_t ret = ocall_write_bucket(&ocall_ret, position, sbuf.data());
+    sgx_status_t ret = ocall_write_bucket(&ocall_ret, position, serialized.data());
 
     if (ret != SGX_SUCCESS) {
         ocall_print_string("SGX: ocall_write_bucket failed at runtime level");

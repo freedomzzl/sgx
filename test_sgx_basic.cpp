@@ -27,7 +27,7 @@ void testWithQueryFileSGX(const std::string& query_filename, bool show_details =
 
     // 批量插入数据
     std::cout << "Loading data into SGX IRTree..." << std::endl;
-    if (!enclave.bulkInsertFromFile("medium_data.txt")) {
+    if (!enclave.bulkInsertFromFile("large_data.txt")) {
         std::cerr << "Failed to bulk insert data" << std::endl;
         return;
     }
@@ -74,13 +74,6 @@ void testWithQueryFileSGX(const std::string& query_filename, bool show_details =
                 std::cout << "Time: " << std::fixed << std::setprecision(3) 
                           << (query_time.count() / 1000000.0) << " ms" << std::endl;
                 std::cout << "Results: " << results.size() << " documents" << std::endl;
-                
-                // 显示前几个结果
-                for (size_t i = 0; i < results.size() && i < 3; i++) {
-                    std::cout << "  " << (i + 1) << ". Doc " << results[i].first 
-                              << " - Score: " << std::fixed << std::setprecision(4) 
-                              << results[i].second << std::endl;
-                }
             } else {
                 // 简洁模式只显示基本信息
                 std::cout << "Query " << query_count << ": " << results.size() 
@@ -125,6 +118,7 @@ int main() {
         
         // 测试 SGX 版本
         testWithQueryFileSGX("query.txt", true);
+
         
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

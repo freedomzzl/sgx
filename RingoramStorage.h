@@ -3,10 +3,12 @@
 
 #include "StorageInterface.h"
 #include "ringoram.h"
+#include "ServerStorage.h"
 #include "CryptoUtil.h"
 #include <memory>
 #include <unordered_map>
 #include <vector>
+
 
 using namespace std;
 
@@ -33,11 +35,14 @@ private:
     /// 文档 ID -> ORAM 块 ID 映射表
     std::unordered_map<int, int> doc_id_to_block;
 
+
+
     /// 下一个可分配的块 ID
     int next_block_id;
 
     /// ORAM 容量（块数量）
     int capacity;
+
 
     // ==============================
     // 内部辅助函数
@@ -76,6 +81,7 @@ public:
      * @param use_recursive 是否使用递归 ORAM 模式
      */
     RingOramStorage(int cap, int block_size = 1024);
+
 
     // ==============================
     // StorageInterface 接口实现
@@ -165,6 +171,7 @@ public:
      */
     void mapPathToNode(int path, int node_id) {
         path_to_node_id[path] = node_id;
+
     }
 
     /**
@@ -206,17 +213,6 @@ public:
      * @return 文档数量
      */
     int getStoredDocumentCount() const override;
-
-    // ==============================
-    // 调试与信息输出
-    // ==============================
-
-    /**
-     * @brief 打印 ORAM 存储统计信息
-     *
-     * 包括节点/文档数量、ORAM 层数、缓存大小等。
-     */
-    void printStorageStats() const;
 };
 
 #endif // Ring_ORAM_STORAGE_H
