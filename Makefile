@@ -37,12 +37,12 @@ HEADERS := $(wildcard *.h)
 # ======================================
 
 # Host 编译标志
-HOST_CXXFLAGS = -I$(SGX_SDK)/include -I. -fPIC -O0 -g -std=c++14
-HOST_CFLAGS = -I$(SGX_SDK)/include -I. -fPIC -O0 -g
+HOST_CXXFLAGS = -I$(SGX_SDK)/include -I. -fPIC -O3 -g -std=c++14
+HOST_CFLAGS = -I$(SGX_SDK)/include -I. -fPIC -O3 -g
 
 # Enclave 编译标志
-ENCLAVE_CXXFLAGS = -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx -fpie -fstack-protector -O0 -g -std=c++14 -DINSIDE_ENCLAVE
-ENCLAVE_CFLAGS = -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx -nostdinc -fpie -fstack-protector -O0 -g
+ENCLAVE_CXXFLAGS = -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx -fpie -fstack-protector -O3 -g -std=c++14 -DINSIDE_ENCLAVE
+ENCLAVE_CFLAGS = -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx -nostdinc -fpie -fstack-protector -O3 -g
 # ======================================
 # 默认目标
 # ======================================
