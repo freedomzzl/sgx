@@ -232,7 +232,18 @@ void ringoram::EarlyReshuffle(int l) {
         bucket bkt = sgx_read_bucket(position);
         
         if (bkt.count >= dummyBlockEachbkt) {
-            ReadBucket(position);
+
+            for (int j = 0; j < maxblockEachbkt; j++) {
+		        // 只读取真实且有效的块
+		        if (bkt.ptrs[j] != -1 && bkt.valids[j] && !bkt.blocks[j].IsDummy()) {
+			        // 读取时解密
+			        block encrypted_block = bkt.blocks[j];
+			        vector<char> decrypted_data = decrypt_data(encrypted_block.GetData());
+			        block decrypted_block(encrypted_block.GetLeafid(), encrypted_block.GetBlockindex(), decrypted_data);
+			        stash.push_back(decrypted_block);
+		        }
+	        }
+
             WriteBucket(position);
         }
     }
