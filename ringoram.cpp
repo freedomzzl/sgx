@@ -156,49 +156,16 @@ void ringoram::WriteBucket(int position) {
     
 }
 
-// block ringoram::ReadPath(int leafid, int blockindex) {
-//     block interestblock = dummyBlock;
-//     size_t blocks_this_read = 0;
-    
-//     for (int i = 0; i <= L; i++) {
-//         int position = Path_bucket(leafid, i);
-//         bucket bkt = sgx_read_bucket(position);
-//         int offset = GetBlockOffset(bkt, blockindex);
-        
-//         if (!isPositionCached(position)) {
-//             blocks_this_read += 1;
-//         }
-        
-//         block blk = FindBlock(bkt, offset);
-//         bkt.valids[offset] = 0;
-//         bkt.count += 1;
-        
-//         // 如果是目标块，记录下来，但仍继续走完路径
-//         if (blk.GetBlockindex() == blockindex) {
-//             interestblock = blk;
-//         }
-        
-//         // 标记目标块为无效
-//         if (offset >= 0 && offset < maxblockEachbkt) {
-//             bkt.valids[offset] = 0;
-//             bkt.count += 1;
-//         }
-        
-//         sgx_write_bucket(position, bkt);
-//     }
-
-//     return interestblock;
-// }
 
 block ringoram::ReadPath(int leafid, int blockindex)
 {
-    uint8_t buffer[4096] = {0};
+    uint8_t buffer[65536] = {0};
     int is_dummy = 0;
     size_t actual_data_size = 0; 
    
     sgx_status_t ocall_ret = SGX_SUCCESS;
     sgx_status_t ret = ocall_read_path(&ocall_ret, leafid, blockindex, &is_dummy, buffer, &actual_data_size);
- 
+   
     if (ret != SGX_SUCCESS || ocall_ret != SGX_SUCCESS) {
         ocall_print_string("ReadPath: OCALL failed");
         return dummyBlock;
@@ -306,7 +273,7 @@ vector<char> ringoram::access(int blockindex, Operation op, vector<char> data)
 	// 1. 读取路径获取目标块（加密状态）
 	block interestblock = ReadPath(oldLeaf, blockindex);
 	vector<char> blockdata;
-
+   
 	// 2. 处理读取到的块
 	if (interestblock.GetBlockindex() == blockindex) {
 		// 从路径读取到的目标块，需要解密

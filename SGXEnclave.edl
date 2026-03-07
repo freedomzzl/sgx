@@ -33,11 +33,7 @@ enclave {
             [user_check] int* doc_ids,                 
             [user_check] double* scores                
         );
-        public sgx_status_t ecall_irtree_insert_document(
-            [in, string] const char* text,
-            [user_check] const double* location_min,   
-            [user_check] const double* location_max    
-        );
+        
     };
     
     untrusted {
@@ -70,7 +66,7 @@ enclave {
     int leafid,
     int blockindex,
     [out] int* is_dummy,         
-    [out, size=4096] uint8_t* result_data,
+    [out, size=65536] uint8_t* result_data,
     [out] size_t* actual_size
     );
 

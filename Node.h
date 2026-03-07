@@ -321,12 +321,17 @@ public:
         if (it == child_keywords.end()) return false;
 
         const auto& child_terms = it->second;
+        if (keywords.empty()) return false;
+
+        int hit = 0;
         for (const auto& keyword : keywords) {
-            if (child_terms.count(keyword) == 0) {
-                return false;
+            if (child_terms.count(keyword) > 0) {
+                hit++;
             }
         }
-        return true;
+
+        
+        return (double)hit / keywords.size() >= 0.5;
     }
 
     /**

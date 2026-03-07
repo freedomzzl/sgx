@@ -9,7 +9,7 @@ class Document {
 private:
     int doc_id;
     MBR location;
-    std::unordered_map<std::string, int> term_freq; // ´ÊÆµÍ³¼Æ
+    std::unordered_map<std::string, int> term_freq; 
     std::string raw_text;
 
 public:

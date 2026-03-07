@@ -11,7 +11,7 @@ class SGXEnclaveWrapper {
 private:
     sgx_enclave_id_t eid;
     bool initialized;
-    
+
 public:
     SGXEnclaveWrapper();
     ~SGXEnclaveWrapper();

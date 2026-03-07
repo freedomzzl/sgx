@@ -3,6 +3,7 @@
 
 #include"block.h"
 #include<vector>
+#include<string>
 
 
 /*
@@ -23,6 +24,8 @@ extern int capacity;
 
 extern int blocksize;
 
+extern int k;
+
 
 // 每个 bucket 中真实数据块的数量
 extern int realBlockEachbkt;
@@ -34,10 +37,14 @@ extern int dummyBlockEachbkt;
 extern int EvictRound;
 
 extern block dummyBlock;
+extern std::string dataname;
+extern std::string queryname;
 
 //每个桶的capacity
 extern int maxblockEachbkt;
 
 extern int cacheLevel;
+
+extern int nodes_load;
 
 #endif

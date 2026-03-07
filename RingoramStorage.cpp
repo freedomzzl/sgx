@@ -64,7 +64,7 @@ std::vector<uint8_t> RingOramStorage::readNode(int node_id) {
         int block_id = block_it->second;
 
         std::vector<char> result_data;
-
+      
         result_data = oram->access(block_id, ringoram::READ, {});
 
         if (result_data.empty()) {

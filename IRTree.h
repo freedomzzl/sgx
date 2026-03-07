@@ -1,11 +1,13 @@
 #ifndef IRTREE_H
 #define IRTREE_H
 
+#include <iostream>
 #include <memory>
 #include <vector>
 #include <queue>
 #include <stack>
 #include <functional>
+#include <chrono>
 #include "Node.h"
 #include "Document.h"
 #include "Query.h"
@@ -15,7 +17,6 @@
 #include "SGXEnclave_t.h"
 #include"ringoram.h"
 #include <mutex>
-
 
 //
 // ===============================================
@@ -73,8 +74,9 @@ struct TreeHeapEntry {
 // 得分高的项优先出队（大顶堆）。
 // ===============================================
 struct TreeHeapComparator {
-    bool operator()(const TreeHeapEntry& a, const TreeHeapEntry& b) {
-        return a.score < b.score; // 分数高者优先
+    bool operator()(const TreeHeapEntry& a,
+                    const TreeHeapEntry& b) const {
+        return a.score < b.score;
     }
 };
 
@@ -100,6 +102,7 @@ public:
     InvertedIndex global_index;                 ///< 全局倒排索引（跨节点/文档）
     int next_node_id;                           ///< 下一可分配节点ID
     int next_doc_id;                            ///< 下一可分配文档ID
+    int nodes_visited;                          ///< access的节点数量
 
     // ====================================================
     // 树参数配置
@@ -107,18 +110,15 @@ public:
     int min_capacity;   ///< 节点最小容量（分裂下限）
     int max_capacity;   ///< 节点最大容量（分裂上限）
     int dimensions;     ///< 空间维度（通常为2：经纬度）
+    int tree_level;     ///< 树高
+    int cache_level;     ///< 缓存层数
+    int cache_end_level; ///< 缓存结束的层级 
 
     // ====================================================
     // 联合相关性计算
     // ====================================================
 
-    /**
-     * @brief 计算文本相关性（基于 TF-IDF）
-     * @param doc 待评估文档
-     * @param query_terms 查询关键字列表
-     * @return 文本相关性得分
-     */
-    double computeTextRelevance(const Document& doc, const std::vector<std::string>& query_terms) const;
+  
 
     /**
      * @brief 计算空间相关性（基于MBR与查询范围的重叠程度）
@@ -137,28 +137,6 @@ public:
      */
     double computeJointRelevance(double text_relevance, double spatial_relevance, double alpha) const;
 
-    // ====================================================
-    // 树结构维护
-    // ====================================================
-
-    /**
-     * @brief 选择插入叶节点（根据MBR扩展代价最小原则）
-     * @param mbr 文档或对象的空间范围
-     * @return 目标叶节点ID
-     */
-    int chooseLeaf(const MBR& mbr);
-
-    /**
-     * @brief 向上调整树结构，更新MBR与层级信息
-     * @param node_id 被修改的节点ID
-     */
-    void adjustTree(int node_id);
-
-    /**
-     * @brief 分裂节点（当节点超过max_capacity时触发）
-     * @param node_id 需分裂的节点ID
-     */
-    void splitNode(int node_id);
 
     // ====================================================
     // 递归位置映射初始化
@@ -223,7 +201,6 @@ public:
     // ====================================================
     mutable std::unordered_map<int, std::shared_ptr<Node>> node_cache;  ///< 节点缓存
     mutable std::mutex cache_mutex;                                     ///< 缓存互斥锁
-    const size_t MAX_CACHE_SIZE = 1000;                                 ///< 最大缓存节点数
 
     // ====================================================
     // 搜索辅助函数
@@ -241,28 +218,19 @@ public:
      * @brief 处理叶节点：计算包含的文档的相关性并加入结果集
      */
     void processLeafNode(std::shared_ptr<Node> leaf_node,
-        const std::vector<std::string>& keywords,
-        const MBR& spatial_scope,
-        double alpha,
-        std::vector<TreeHeapEntry>& results) const;
+    const std::vector<std::string>& keywords,
+    const MBR& spatial_scope,
+    double alpha,
+    std::vector<TreeHeapEntry>& results,
+    int k,                    // 最大结果数
+    double threshold) const;
 
-    void processInternalNodeWithPath(std::shared_ptr<Node> internal_node,
-        int parent_path,
+     void processInternalNodeWithPath(std::shared_ptr<Node> internal_node,
         const std::vector<std::string>& keywords,
         const MBR& spatial_scope,
         double alpha,
         std::priority_queue<TreeHeapEntry, std::vector<TreeHeapEntry>, TreeHeapComparator>& queue);
 
-    /**
-     * @brief 处理内部节点：计算子节点相关性并入队
-     */
-    void processInternalNode(std::shared_ptr<Node> internal_node,
-        const std::vector<std::string>& keywords,
-        const MBR& spatial_scope,
-        double alpha,
-        std::priority_queue<TreeHeapEntry,
-        std::vector<TreeHeapEntry>,
-        TreeHeapComparator>& queue) const;
 
     // ====================================================
     // 构造函数
@@ -278,15 +246,7 @@ public:
     IRTree(std::shared_ptr<StorageInterface> storage_impl,
         int dims = 2, int min_cap = 2, int max_cap = 4);
 
-    // ====================================================
-    // 文档插入接口
-    // ====================================================
 
-    /// 插入单个文档（提供文本与空间位置）
-    void insertDocument(const std::string& text, const MBR& location);
-
-    /// 插入已构造的 Document 对象
-    void insertDocument(std::shared_ptr<Document> document);
 
     // ====================================================
     // 查询接口
@@ -311,31 +271,20 @@ public:
         int k = 10,
         double alpha = 0.5);
 
-    // ====================================================
-    // 批量插入接口（构建阶段）
-    // ====================================================
 
-    /// 从文件批量插入文档（文本 + 坐标）
-    void bulkInsertFromFile(const std::string& filename);
-
-    /// 从内存批量插入文档（三元组格式）
-    void bulkInsertDocuments(const std::vector<std::tuple<std::string, double, double>>& documents);
-
-    /// 优化后的批量插入（性能增强版）
+    /// 优化后的批量插入
     void optimizedBulkInsertFromFile(const std::string& filename);
     void optimizedBulkInsertDocuments(const std::vector<std::tuple<std::string, double, double>>& documents);
 
     /// 批量构建全局倒排索引
     void bulkBuildGlobalIndex(const std::vector<std::shared_ptr<Document>>& documents);
 
-    /// 批量将文档插入树结构
-    void bulkInsertToTree(const std::vector<std::shared_ptr<Document>>& documents);
 
     // ====================================================
     // 存储同步与缓存管理
     // ====================================================
 
-    /// 将缓存中所有节点刷新写回存储
+    /// 将缓存中下半层节点刷新写回存储
     void flushNodeCache();
 
     /// 从缓存加载节点（不存在则从存储加载）
@@ -344,23 +293,6 @@ public:
     /// 将节点保存并更新缓存
     void cachedSaveNode(int node_id, std::shared_ptr<Node> node);
 
-    /// 清空缓存
-    void clearCache() {
-        std::lock_guard<std::mutex> lock(cache_mutex);
-        node_cache.clear();
-        char msg1[256];
-        snprintf(msg1, sizeof(msg1), "IRTree cache cleared - %zu nodes removed", node_cache.size());
-        ocall_print_string(msg1);
-    }
-
-    /// 打印缓存状态
-    void printCacheStats() const {
-        std::lock_guard<std::mutex> lock(cache_mutex);
-        char msg2[256];
-        snprintf(msg2, sizeof(msg2), "IRTree cache stats - Size: %zu", node_cache.size());
-        ocall_print_string(msg2);
-    }
-
     // ====================================================
     // 树结构优化
     // ====================================================
@@ -368,9 +300,11 @@ public:
     /// 底向上构建 IRTree（批量建树）
     void buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& documents);
 
-    void computeAndSetChildUpperBounds(std::shared_ptr<Node> parent);
+    /*pathoram::CommunicationStats getOramStats() const;
+    void resetOramStats() const;*/
 
     int search_blocks;
+ 
 };
 
 #endif // IRTREE_H
