@@ -33,7 +33,6 @@ enclave {
             [user_check] int* doc_ids,                 
             [user_check] double* scores                
         );
-        
     };
     
     untrusted {
@@ -66,7 +65,7 @@ enclave {
     int leafid,
     int blockindex,
     [out] int* is_dummy,         
-    [out, size=65536] uint8_t* result_data,
+    [out, size=4096] uint8_t* result_data,
     [out] size_t* actual_size
     );
 

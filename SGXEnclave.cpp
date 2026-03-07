@@ -70,7 +70,10 @@ sgx_status_t ecall_irtree_bulk_insert(const char* filename) {
         ocall_print_string(msg);
         
         g_irtree->optimizedBulkInsertFromFile(filename);
-    
+        
+        snprintf(msg, sizeof(msg), "Bulk insert completed for file: %s", filename);
+        ocall_print_string(msg);
+        
         return SGX_SUCCESS;
     } catch (const std::exception& e) {
         char msg[200];
@@ -79,11 +82,6 @@ sgx_status_t ecall_irtree_bulk_insert(const char* filename) {
         return SGX_ERROR_UNEXPECTED;
     }
 }
-
-
-
-
-
 
 sgx_status_t ecall_irtree_search(
     const char* keywords,
@@ -98,8 +96,7 @@ sgx_status_t ecall_irtree_search(
         ocall_print_string("ERROR: IRTree not initialized");
         return SGX_ERROR_UNEXPECTED;
     }
-    
-    // 手动验证所有指针参数
+   
     if (!keywords) {
         ocall_print_string("ERROR: Null keywords pointer");
         return SGX_ERROR_INVALID_PARAMETER;
@@ -120,8 +117,7 @@ sgx_status_t ecall_irtree_search(
         ocall_print_string("ERROR: Invalid k value");
         return SGX_ERROR_INVALID_PARAMETER;
     }
-    
-    // 验证输出缓冲区 
+   
     if (k > 0) {
         if (!doc_ids) {
             ocall_print_string("ERROR: Null doc_ids pointer but k > 0");
@@ -132,8 +128,8 @@ sgx_status_t ecall_irtree_search(
             ocall_print_string("ERROR: Null scores pointer but k > 0");
             return SGX_ERROR_INVALID_PARAMETER;
         }
-        
-      
+     
+     
         try {
             // 尝试写入第一个元素来测试缓冲区
             doc_ids[0] = -1;
@@ -197,16 +193,19 @@ sgx_status_t ecall_irtree_search(
             return SGX_SUCCESS;
         }
         
-
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Searching for %zu keywords: %s", 
+                 keyword_list.size(), keywords);
+        ocall_print_string(msg);
+        
         // 执行搜索
         auto results = g_irtree->search(keyword_list, query_scope, k, alpha);
-      
+        
         // 设置结果计数
         *result_count = std::min(k, (int)results.size());
         
-        // 填充输出数组 
         for (int i = 0; i < *result_count; i++) {
-            if (i < k) { 
+            if (i < k) {  // 手动边界检查
                 if (results[i].isData()) {
                     doc_ids[i] = results[i].document->getId();
                     scores[i] = results[i].score;
@@ -216,7 +215,10 @@ sgx_status_t ecall_irtree_search(
                 }
             }
         }
-     
+        
+        snprintf(msg, sizeof(msg), "Search completed: %d results found", *result_count);
+        ocall_print_string(msg);
+        
         return SGX_SUCCESS;
         
     } catch (const std::exception& e) {
@@ -226,6 +228,7 @@ sgx_status_t ecall_irtree_search(
         return SGX_ERROR_UNEXPECTED;
     }
 }
+
 
 
 // ================================
@@ -470,4 +473,3 @@ sgx_status_t ecall_test_ringoram_storage() {
         return SGX_ERROR_UNEXPECTED;
     }
 }
-

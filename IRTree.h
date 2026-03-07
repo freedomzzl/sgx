@@ -272,7 +272,7 @@ public:
         double alpha = 0.5);
 
 
-    /// 优化后的批量插入
+    /// 批量插入
     void optimizedBulkInsertFromFile(const std::string& filename);
     void optimizedBulkInsertDocuments(const std::vector<std::tuple<std::string, double, double>>& documents);
 

@@ -35,9 +35,7 @@ public:
         const std::string& keywords,
         double min_x, double min_y, double max_x, double max_y,
         int k = 10, double alpha = 0.5);
-    bool insertDocument(
-        const std::string& text,
-        double min_x, double min_y, double max_x, double max_y);
+
     
     // 状态查询
     bool isInitialized() const { return initialized; }
