@@ -12,10 +12,10 @@ int realBlockEachbkt = 4;
 int dummyBlockEachbkt = 6;
 int k=1;
 int EvictRound = 20;
-std::string dataname = "data/data_1024.txt";
+std::string dataname = "data/data_65536.txt";
 std::string queryname = "data/query_3keywords.txt";
 block dummyBlock(-1, -1, {});
 int maxblockEachbkt = realBlockEachbkt + dummyBlockEachbkt;
 
 int cacheLevel = (OramL/2);
-int nodes_load=2;
+int nodes_load=k;

@@ -1059,4 +1059,3 @@ void IRTree::buildTreeBottomUp(const std::vector<std::shared_ptr<Document>>& doc
     flushNodeCache();
     PRINT("Bottom-up tree construction completed");
 }
-
