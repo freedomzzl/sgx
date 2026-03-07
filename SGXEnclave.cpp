@@ -193,10 +193,7 @@ sgx_status_t ecall_irtree_search(
             return SGX_SUCCESS;
         }
         
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Searching for %zu keywords: %s", 
-                 keyword_list.size(), keywords);
-        ocall_print_string(msg);
+     
         
         // 执行搜索
         auto results = g_irtree->search(keyword_list, query_scope, k, alpha);
@@ -205,7 +202,7 @@ sgx_status_t ecall_irtree_search(
         *result_count = std::min(k, (int)results.size());
         
         for (int i = 0; i < *result_count; i++) {
-            if (i < k) {  // 手动边界检查
+            if (i < k) {  
                 if (results[i].isData()) {
                     doc_ids[i] = results[i].document->getId();
                     scores[i] = results[i].score;
@@ -215,9 +212,7 @@ sgx_status_t ecall_irtree_search(
                 }
             }
         }
-        
-        snprintf(msg, sizeof(msg), "Search completed: %d results found", *result_count);
-        ocall_print_string(msg);
+   
         
         return SGX_SUCCESS;
         

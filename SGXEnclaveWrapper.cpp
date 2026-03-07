@@ -367,7 +367,7 @@ extern "C" sgx_status_t ocall_read_path(
 
         const auto& data = interestblock.GetData();
         if (!data.empty() && result_data) {
-            if (data.size() > 4096) {
+            if (data.size() > 65536) {
                 std::cerr << "ERROR: Block data size " << data.size() 
                   << " exceeds maximum blocksize" << std::endl;
                 return SGX_ERROR_INVALID_PARAMETER;
@@ -720,16 +720,12 @@ std::vector<std::pair<int, double>> SGXEnclaveWrapper::search(
     const std::string& keywords,
     double min_x, double min_y, double max_x, double max_y,
     int k, double alpha) {
-    
-    std::cout << "=== ENTERING SGXEnclaveWrapper::search ===" << std::endl;
-    
+   
     if (!initialized) {
         std::cerr << "ERROR: Enclave not initialized" << std::endl;
         throw std::runtime_error("Enclave not initialized");
     }
-    
-    std::cout << "Enclave is initialized, eid: " << eid << std::endl;
-    
+   
     std::vector<std::pair<int, double>> results;
     
     // 参数验证
@@ -737,31 +733,22 @@ std::vector<std::pair<int, double>> SGXEnclaveWrapper::search(
         std::cout << "WARNING: Empty keywords" << std::endl;
         return results;
     }
-    
-    std::cout << "Keywords: '" << keywords << "'" << std::endl;
-    std::cout << "Spatial scope: [" << min_x << "," << min_y << "] to [" << max_x << "," << max_y << "]" << std::endl;
-    std::cout << "k: " << k << ", alpha: " << alpha << std::endl;
-    
+   
     // 准备空间范围数组
     double spatial_scope[4] = {min_x, min_y, max_x, max_y};
     int result_count = 0;
     std::vector<int> doc_ids(k, -1);
     std::vector<double> scores(k, 0.0);
     
-    std::cout << "Before ECALL call - preparing parameters..." << std::endl;
-    
+   
     sgx_status_t ecall_ret = SGX_SUCCESS;
     sgx_status_t ret = SGX_SUCCESS;
-    
-    std::cout << "Calling ecall_irtree_search..." << std::endl;
-    
+  
     // 直接调用，不检查返回值先
     ret = ecall_irtree_search(eid, &ecall_ret,
         keywords.c_str(), spatial_scope, k, alpha,
         &result_count, doc_ids.data(), scores.data());
-    
-    std::cout << "After ECALL call - ret: " << ret << ", ecall_ret: " << ecall_ret << std::endl;
-    
+   
     if (ret != SGX_SUCCESS) {
         std::cerr << "ECALL failed at SGX level: " << ret << std::endl;
         throw std::runtime_error("ECALL failed at SGX level: " + std::to_string(ret));
@@ -771,15 +758,12 @@ std::vector<std::pair<int, double>> SGXEnclaveWrapper::search(
         std::cerr << "ECALL failed at enclave level: " << ecall_ret << std::endl;
         throw std::runtime_error("ECALL failed at enclave level: " + std::to_string(ecall_ret));
     }
-    
-    std::cout << "ECALL succeeded, result_count: " << result_count << std::endl;
-    
+  
     // 转换结果
     for (int i = 0; i < result_count; i++) {
         results.emplace_back(doc_ids[i], scores[i]);
     }
-    
-    std::cout << "Search completed with " << results.size() << " results" << std::endl;
+  
     return results;
 }
 

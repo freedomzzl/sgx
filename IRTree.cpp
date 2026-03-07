@@ -29,7 +29,6 @@ IRTree::IRTree(std::shared_ptr<StorageInterface> storage_impl,
 // 节点管理方法
 std::shared_ptr<Node> IRTree::loadNode(int node_id) const {
     // 从存储中读取节点数据
-    PRINT("--------loadNode readNode");
     auto node_data = storage->readNode(node_id);
     if (node_data.empty()) {
         // std::cout << "No data found for node " << node_id << std::endl;
